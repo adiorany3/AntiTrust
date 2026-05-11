@@ -45,6 +45,7 @@ ONLINE_FILE = "online_status.json"
 ROOM_SETTINGS_FILE = "room_settings.json"
 PRIVATE_LINKS_FILE = "private_links.json"
 PACKET_DIR = "secure_packets"
+SKULL_IMAGE_FILE = "assets/skull.svg"
 
 WIB = timezone(timedelta(hours=7))
 ONLINE_ACTIVE_SECONDS = 20
@@ -186,19 +187,22 @@ hr { border: none; border-top: 1px dashed var(--line); margin: .9rem 0; }
 .panic-title { color: var(--danger); letter-spacing: 1px; }
 .panic-copy { color: #ff9db1; margin: 2px 0 0 0; font-size: .88rem; }
 .cursor-blink { display: inline-block; width: 9px; height: 17px; background: var(--green); margin-left: 4px; animation: blink .85s infinite; }
-.ascii-skull {
-  color: var(--green);
+.skull-lock-frame {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: #000;
   border: 1px solid var(--line);
   padding: 22px 12px;
   margin-top: 18px;
-  text-align: center;
-  font-family: 'Share Tech Mono', monospace !important;
-  font-size: clamp(11px, 2.2vw, 16px);
-  line-height: 1.08;
-  white-space: pre;
-  text-shadow: 0 0 8px rgba(0,255,102,.75);
   box-shadow: 0 0 20px rgba(0,255,102,.16);
+}
+.skull-lock-img {
+  display: block;
+  width: min(320px, 78vw);
+  max-width: 100%;
+  height: auto;
+  filter: drop-shadow(0 0 10px rgba(0,255,102,.72));
 }
 .ascii-lock-note { color: rgba(140,255,174,.72); text-align: center; margin-top: 8px; font-size: .9rem; }
 @keyframes blink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
@@ -241,34 +245,6 @@ html, body { margin: 0; padding: 0; background: transparent; font-family: 'Share
 ::-webkit-scrollbar-thumb { background: #00ff66; }
 """
 
-ASCII_SKULL = r'''
-                 uuuuuuu
-             uu$$$$$$$$$$$uu
-          uu$$$$$$$$$$$$$$$$$uu
-         u$$$$$$$$$$$$$$$$$$$$$u
-        u$$$$$$$$$$$$$$$$$$$$$$$u
-       u$$$$$$$$$$$$$$$$$$$$$$$$$u
-       u$$$$$$$$$$$$$$$$$$$$$$$$$u
-       u$$$$$$"   "$$$"   "$$$$$$u
-       "$$$$"      u$u       $$$$"
-        $$$u       u$u       u$$$
-        $$$u      u$$$u      u$$$
-         "$$$$uu$$$   $$$uu$$$$"
-          "$$$$$$$"   "$$$$$$$"
-            u$$$$$$$u$$$$$$$u
-             u$"$"$"$"$"$u
-  uuu        $$u$ $ $ $ $u$$       uuu
- u$$$$        $$$$$u$u$u$$$       u$$$$
-  $$$$$uu      "$$$$$$$$$"     uu$$$$$$
- u$$$$$$$$$$$uu    """""    uuuu$$$$$$$$$$
- $$$$"""$$$$$$$$$$uuu   uu$$$$$$$$$"""$$$"
-  """      ""$$$$$$$$$$$uu "$"""
-            uuuu ""$$$$$$$$$$uuu
-   u$$$uuu$$$$$$$$$uu ""$$$$$$$$$$$uuu$$$
-   $$$$$$$$$$""""           ""$$$$$$$$$$$"
-    "$$$$$"                      ""$$$$""
-      $$$"                         $$$$"
-'''
 
 
 # ==============================
@@ -504,11 +480,25 @@ def render_admin_share_panel() -> None:
             st.code(st.session_state["last_room_share_url"], language="text")
             st.caption("Bagikan link ini ke user. Room akan otomatis terkunci sesuai target_room.")
 
+def get_skull_image_data_uri() -> str:
+    skull_path = Path(SKULL_IMAGE_FILE)
+
+    if skull_path.exists():
+        svg_bytes = skull_path.read_bytes()
+    else:
+        svg_bytes = b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="skull lock">\n  <rect width="512" height="512" fill="#000000"/>\n  <path d="M256 46C149 46 82 116 82 213c0 62 29 106 77 128v67c0 30 24 54 54 54h86c30 0 54-24 54-54v-67c48-22 77-66 77-128C430 116 363 46 256 46Z" fill="none" stroke="#00ff66" stroke-width="18" stroke-linejoin="round"/>\n  <path d="M178 238c0-29 20-52 46-52s46 23 46 52-20 52-46 52-46-23-46-52Zm108 0c0-29 20-52 46-52s46 23 46 52-20 52-46 52-46-23-46-52Z" fill="#00ff66" fill-opacity="0.88"/>\n  <path d="M256 289l-25 50h50l-25-50Z" fill="none" stroke="#00ff66" stroke-width="16" stroke-linejoin="round"/>\n  <path d="M183 371h146M202 407h108M226 371v72M256 371v72M286 371v72" fill="none" stroke="#00ff66" stroke-width="14" stroke-linecap="round"/>\n  <path d="M87 89l338 338M425 89L87 427" stroke="#00ff66" stroke-width="8" stroke-opacity="0.32"/>\n</svg>'
+
+    encoded = base64.b64encode(svg_bytes).decode("ascii")
+    return f"data:image/svg+xml;base64,{encoded}"
+
+
 def render_locked_landing() -> None:
-    skull = html.escape(ASCII_SKULL)
+    skull_src = get_skull_image_data_uri()
     st.markdown(
         f"""
-        <pre class="ascii-skull">{skull}</pre>
+        <div class="skull-lock-frame">
+          <img class="skull-lock-img" src="{skull_src}" alt="locked private channel skull" />
+        </div>
         <p class="ascii-lock-note">public_channel=disabled | invite_required=true</p>
         """,
         unsafe_allow_html=True,
