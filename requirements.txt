@@ -1,0 +1,4 @@
+streamlit
+cryptography
+streamlit-autorefresh
+pillow
