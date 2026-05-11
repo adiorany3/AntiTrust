@@ -1487,7 +1487,7 @@ def main() -> None:
     st.markdown(
         """
         <div class="terminal-bar">
-          <p class="terminal-line">encrypted private-room chat | public channel disabled | invite link locked-room mode <span class="cursor-blink"></span></p>
+          <p class="terminal-line">./encrypted/private-room/chat && ./public/channel --disabled && ./invite_link/locked-room --mode <span class="cursor-blink"></span></p>
         </div>
         """,
         unsafe_allow_html=True,
