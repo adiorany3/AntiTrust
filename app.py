@@ -186,6 +186,21 @@ hr { border: none; border-top: 1px dashed var(--line); margin: .9rem 0; }
 .panic-title { color: var(--danger); letter-spacing: 1px; }
 .panic-copy { color: #ff9db1; margin: 2px 0 0 0; font-size: .88rem; }
 .cursor-blink { display: inline-block; width: 9px; height: 17px; background: var(--green); margin-left: 4px; animation: blink .85s infinite; }
+.ascii-skull {
+  color: var(--green);
+  background: #000;
+  border: 1px solid var(--line);
+  padding: 22px 12px;
+  margin-top: 18px;
+  text-align: center;
+  font-family: 'Share Tech Mono', monospace !important;
+  font-size: clamp(11px, 2.2vw, 16px);
+  line-height: 1.08;
+  white-space: pre;
+  text-shadow: 0 0 8px rgba(0,255,102,.75);
+  box-shadow: 0 0 20px rgba(0,255,102,.16);
+}
+.ascii-lock-note { color: rgba(140,255,174,.72); text-align: center; margin-top: 8px; font-size: .9rem; }
 @keyframes blink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
 ::-webkit-scrollbar { width: 8px; }
 ::-webkit-scrollbar-track { background: #000; }
@@ -225,6 +240,36 @@ html, body { margin: 0; padding: 0; background: transparent; font-family: 'Share
 ::-webkit-scrollbar-track { background: #000; }
 ::-webkit-scrollbar-thumb { background: #00ff66; }
 """
+
+ASCII_SKULL = r'''
+                 uuuuuuu
+             uu$$$$$$$$$$$uu
+          uu$$$$$$$$$$$$$$$$$uu
+         u$$$$$$$$$$$$$$$$$$$$$u
+        u$$$$$$$$$$$$$$$$$$$$$$$u
+       u$$$$$$$$$$$$$$$$$$$$$$$$$u
+       u$$$$$$$$$$$$$$$$$$$$$$$$$u
+       u$$$$$$"   "$$$"   "$$$$$$u
+       "$$$$"      u$u       $$$$"
+        $$$u       u$u       u$$$
+        $$$u      u$$$u      u$$$
+         "$$$$uu$$$   $$$uu$$$$"
+          "$$$$$$$"   "$$$$$$$"
+            u$$$$$$$u$$$$$$$u
+             u$"$"$"$"$"$u
+  uuu        $$u$ $ $ $ $u$$       uuu
+ u$$$$        $$$$$u$u$u$$$       u$$$$
+  $$$$$uu      "$$$$$$$$$"     uu$$$$$$
+ u$$$$$$$$$$$uu    """""    uuuu$$$$$$$$$$
+ $$$$"""$$$$$$$$$$uuu   uu$$$$$$$$$"""$$$"
+  """      ""$$$$$$$$$$$uu "$"""
+            uuuu ""$$$$$$$$$$uuu
+   u$$$uuu$$$$$$$$$uu ""$$$$$$$$$$$uuu$$$
+   $$$$$$$$$$""""           ""$$$$$$$$$$$"
+    "$$$$$"                      ""$$$$""
+      $$$"                         $$$$"
+'''
+
 
 # ==============================
 # STORAGE + CRYPTO HELPERS
@@ -458,6 +503,17 @@ def render_admin_share_panel() -> None:
         if st.session_state.get("last_room_share_url"):
             st.code(st.session_state["last_room_share_url"], language="text")
             st.caption("Bagikan link ini ke user. Room akan otomatis terkunci sesuai target_room.")
+
+def render_locked_landing() -> None:
+    skull = html.escape(ASCII_SKULL)
+    st.markdown(
+        f"""
+        <pre class="ascii-skull">{skull}</pre>
+        <p class="ascii-lock-note">public_channel=disabled | invite_required=true</p>
+        """,
+        unsafe_allow_html=True,
+    )
+
 
 # ==============================
 # ROOM SETTINGS + AUTO DESTROY
@@ -1150,7 +1206,7 @@ def main() -> None:
     st.markdown(
         """
         <div class="terminal-bar">
-          <p class="terminal-line">encrypted multi-room chat | invite link locked-room mode | panic destroy enabled</p>
+          <p class="terminal-line">encrypted private-room chat | public channel disabled | invite link locked-room mode</p>
           <p class="terminal-line">image/voice/document packets stored encrypted outside chat JSON</p>
         </div>
         """,
@@ -1168,27 +1224,26 @@ def main() -> None:
 
     invite_token = get_query_param("invite")
     invite_room = resolve_room_from_token(invite_token) if invite_token else None
-    if invite_token and not invite_room:
-        st.error("invite_link=invalid_or_revoked")
+
+    if not invite_token:
+        render_locked_landing()
         st.stop()
 
-    col_room, col_user = st.columns(2)
-    with col_room:
-        if invite_room:
-            room = invite_room
-            st.text_input("room:", value=room, disabled=True)
-            st.success("invite_link=active | room=locked")
-        else:
-            room = st.text_input("room:", placeholder="black-room-01")
+    if not invite_room:
+        st.error("invite_link=invalid_or_revoked")
+        render_locked_landing()
+        st.stop()
 
-    with col_user:
-        username = st.text_input("user:", placeholder="zero_cool")
-
-    room = room.strip() if isinstance(room, str) else ""
+    room = invite_room.strip()
+    st.markdown(
+        f'<div class="compact-panel"><p class="terminal-line">invite_link=active | room=locked | room={html.escape(room)}</p></div>',
+        unsafe_allow_html=True,
+    )
+    username = st.text_input("user:", placeholder="zero_cool")
     username = username.strip() if isinstance(username, str) else ""
 
-    if not room or not username:
-        st.info("Set room dan user untuk masuk ke terminal chat. Admin dapat membuat share link lewat sidebar.")
+    if not username:
+        st.info("Isi user untuk masuk ke terminal chat private.")
         return
 
     active_users = update_online_status(room, username)

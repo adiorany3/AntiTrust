@@ -1,11 +1,12 @@
 # AntiTrust Terminal
 
-Aplikasi chat multi-room berbasis Streamlit dengan tema terminal hacker.
+Aplikasi chat private-room berbasis Streamlit dengan tema terminal hacker. Public channel/manual room entry dinonaktifkan; akses chat hanya lewat invite link admin.
 
 ## Fitur utama
 
 - Admin dapat membuat share link untuk room tertentu.
 - Link memakai token invite: user membuka `https://antitrust.streamlit.app/?invite=TOKEN` dan room otomatis terkunci.
+- Public channel dihapus: tanpa invite link, halaman hanya menampilkan ASCII skull dan tidak membuka form room/chat.
 - Pesan teks terenkripsi dengan Fernet.
 - Image Packet, Voice Packet, dan Document Packet disimpan sebagai file terenkripsi di luar `chat_rooms.json` agar browser tidak lag saat file besar.
 - Preview gambar kecil memakai thumbnail.
@@ -48,7 +49,7 @@ streamlit run app.py
 
 ## Cara admin membuat link room
 
-1. Buka app.
+1. Buka app. Halaman utama tanpa invite hanya menampilkan ASCII skull karena public channel sudah dimatikan.
 2. Masuk ke sidebar `admin_share_link`.
 3. Isi `admin_password`.
 4. Isi `target_room`, misalnya `black-room-01`.
@@ -67,3 +68,19 @@ https://antitrust.streamlit.app/?invite=TOKEN_RAHASIA
 - File `private_links.json` menyimpan hash token, bukan token mentah.
 - Token invite hanya dapat dipakai selama `fernet.key` masih sama dan data `private_links.json` belum dihapus.
 - Jika app diredeploy dan file runtime reset, link invite lama dapat hilang kecuali storage dipertahankan.
+
+## Perilaku public URL
+
+Jika user membuka URL utama tanpa token:
+
+```text
+https://antitrust.streamlit.app/
+```
+
+Aplikasi hanya menampilkan gambar tengkorak ASCII dan status:
+
+```text
+public_channel=disabled | invite_required=true
+```
+
+Form chat hanya muncul jika URL memiliki token invite yang valid dari admin.
