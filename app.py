@@ -377,7 +377,7 @@ def epoch_now() -> int:
     return int(time.time())
 
 # ==============================
-# QUERY + ADMIN SHARE LINK
+# QUERY + ADMIN PANEL + SHARE LINK
 # ==============================
 def get_query_param(name: str) -> str:
     try:
@@ -404,6 +404,11 @@ def valid_invite_token(token: str) -> bool:
     return all(char in allowed for char in token)
 
 
+def secrets_token() -> str:
+    import secrets
+    return secrets.token_urlsafe(32)
+
+
 def create_room_share_token(room: str) -> str:
     token = secrets_token()
     links = load_json(PRIVATE_LINKS_FILE)
@@ -414,12 +419,6 @@ def create_room_share_token(room: str) -> str:
     }
     save_json(PRIVATE_LINKS_FILE, links)
     return token
-
-
-def secrets_token() -> str:
-    # Wrapper so the token generator is easy to harden later.
-    import secrets
-    return secrets.token_urlsafe(32)
 
 
 def resolve_room_from_token(token: str) -> str | None:
@@ -443,42 +442,257 @@ def build_share_url(token: str, public_url: str = "") -> str:
     return f"{base_url}/?{urlencode({'invite': token})}"
 
 
-def render_admin_share_panel() -> None:
+@st.cache_data(show_spinner=False)
+def make_qr_png(link: str) -> bytes:
+    import qrcode
+
+    qr = qrcode.QRCode(
+        version=None,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=8,
+        border=3,
+    )
+    qr.add_data(link)
+    qr.make(fit=True)
+    image = qr.make_image(fill_color="black", back_color="white")
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def revoke_links_for_room(room: str) -> int:
+    links = load_json(PRIVATE_LINKS_FILE)
+    revoked = 0
+    for link_data in links.values():
+        if not isinstance(link_data, dict):
+            continue
+        linked_room = decrypt_message(str(link_data.get("room", "")))
+        if linked_room == room and link_data.get("active", True):
+            link_data["active"] = False
+            link_data["revoked_at"] = str(epoch_now())
+            revoked += 1
+    if revoked:
+        save_json(PRIVATE_LINKS_FILE, links)
+    return revoked
+
+
+def delete_room_everywhere(room: str, revoke_invites: bool = True) -> dict[str, int]:
+    rooms = load_json(CHAT_FILE)
+    online = load_json(ONLINE_FILE)
+    settings = load_json(ROOM_SETTINGS_FILE)
+
+    deleted_messages = len(rooms.get(room, [])) if isinstance(rooms.get(room, []), list) else 0
+    existed = int(room in rooms or room in online or room in settings or packet_room_dir(room).exists())
+
+    rooms.pop(room, None)
+    online.pop(room, None)
+    settings.pop(room, None)
+    delete_room_packet_files(room)
+
+    save_json(CHAT_FILE, rooms)
+    save_json(ONLINE_FILE, online)
+    save_json(ROOM_SETTINGS_FILE, settings)
+
+    revoked_links = revoke_links_for_room(room) if revoke_invites else 0
+    return {
+        "existed": existed,
+        "deleted_messages": deleted_messages,
+        "revoked_links": revoked_links,
+    }
+
+
+def collect_known_rooms() -> set[str]:
+    rooms = set(load_json(CHAT_FILE).keys())
+    rooms.update(load_json(ONLINE_FILE).keys())
+    rooms.update(load_json(ROOM_SETTINGS_FILE).keys())
+
+    links = load_json(PRIVATE_LINKS_FILE)
+    for link_data in links.values():
+        if not isinstance(link_data, dict):
+            continue
+        linked_room = decrypt_message(str(link_data.get("room", "")))
+        if linked_room and not linked_room.startswith("[Pesan tidak dapat didekripsi]"):
+            rooms.add(linked_room)
+    return rooms
+
+
+def get_admin_room_rows(show_only_active: bool = False) -> list[dict[str, Any]]:
+    now = epoch_now()
+    rooms_data = load_json(CHAT_FILE)
+    online_data = load_json(ONLINE_FILE)
+    links = load_json(PRIVATE_LINKS_FILE)
+    rows: list[dict[str, Any]] = []
+
+    active_link_count_by_room: dict[str, int] = {}
+    total_link_count_by_room: dict[str, int] = {}
+    for link_data in links.values():
+        if not isinstance(link_data, dict):
+            continue
+        linked_room = decrypt_message(str(link_data.get("room", "")))
+        if not linked_room or linked_room.startswith("[Pesan tidak dapat didekripsi]"):
+            continue
+        total_link_count_by_room[linked_room] = total_link_count_by_room.get(linked_room, 0) + 1
+        if link_data.get("active", True):
+            active_link_count_by_room[linked_room] = active_link_count_by_room.get(linked_room, 0) + 1
+
+    for room in collect_known_rooms():
+        active_users_map = get_active_users_from_online(online_data, room, now)
+        if show_only_active and not active_users_map:
+            continue
+        config = get_room_config(room)
+        last_active_at = int(config.get("last_active_at") or 0)
+        messages = rooms_data.get(room, [])
+        rows.append(
+            {
+                "room": room,
+                "status": "ACTIVE" if active_users_map else "IDLE",
+                "active_users": len(active_users_map),
+                "users": ", ".join(active_users_map.keys()) if active_users_map else "-",
+                "messages": len(messages) if isinstance(messages, list) else 0,
+                "auto_destroy": choice_from_minutes(config.get("auto_destroy_minutes")),
+                "active_links": active_link_count_by_room.get(room, 0),
+                "total_links": total_link_count_by_room.get(room, 0),
+                "last_active_at": last_active_at,
+            }
+        )
+
+    return sorted(rows, key=lambda item: (item["status"] != "ACTIVE", -int(item["last_active_at"]), item["room"]))
+
+
+def render_qr_for_last_link() -> None:
+    share_url = st.session_state.get("last_room_share_url", "")
+    if not share_url:
+        return
+
+    st.code(share_url, language="text")
+    try:
+        qr_png = make_qr_png(share_url)
+        st.image(qr_png, caption="QR invite link", use_container_width=True)
+        st.download_button(
+            "DOWNLOAD QR PNG",
+            data=qr_png,
+            file_name="antitrust_room_invite_qr.png",
+            mime="image/png",
+            key="download_invite_qr_png",
+            use_container_width=True,
+        )
+    except Exception as exc:
+        st.error(f"qr_error={exc}")
+    st.caption("Bagikan link atau QR ini ke user. Room akan otomatis terkunci sesuai target_room.")
+
+
+def render_admin_login(admin_password: str) -> bool:
+    if st.session_state.get("admin_authenticated"):
+        return True
+
+    password = st.text_input("admin_password:", type="password", key="admin_password_input")
+    if st.button("LOGIN ADMIN", key="admin_login_button", use_container_width=True):
+        if hmac.compare_digest(password, admin_password):
+            st.session_state["admin_authenticated"] = True
+            st.success("admin_login=success")
+            st.rerun()
+        else:
+            st.error("admin_login=failed")
+    return False
+
+
+def render_admin_create_link(public_url: str) -> None:
+    st.markdown("#### share_link")
+    target_room = st.text_input("target_room:", placeholder="black-room-01", key="admin_target_room_input")
+    target_public_url = st.text_input(
+        "public_app_url:",
+        value=public_url,
+        placeholder="https://antitrust.streamlit.app",
+        key="admin_public_url_input",
+    )
+
+    if st.button("CREATE ROOM SHARE LINK", key="create_room_share_link", use_container_width=True):
+        clean_room = target_room.strip()
+        if not clean_room:
+            st.error("target_room tidak boleh kosong.")
+        else:
+            token = create_room_share_token(clean_room)
+            st.session_state["last_room_share_url"] = build_share_url(token, target_public_url)
+            st.session_state["last_room_share_target"] = clean_room
+            st.success(f"share_link=created | room={clean_room}")
+
+    render_qr_for_last_link()
+
+
+def render_admin_room_dashboard() -> None:
+    st.markdown("#### active_rooms")
+    show_only_active = st.toggle("show_only_active_rooms", value=True, key="admin_show_only_active_rooms")
+    rows = get_admin_room_rows(show_only_active=show_only_active)
+
+    if not rows:
+        st.info("active_rooms=empty")
+        return
+
+    table_rows = [
+        {
+            "room": row["room"],
+            "status": row["status"],
+            "users": row["users"],
+            "messages": row["messages"],
+            "links": f"{row['active_links']}/{row['total_links']}",
+            "auto_destroy": row["auto_destroy"],
+        }
+        for row in rows
+    ]
+    st.dataframe(table_rows, hide_index=True, use_container_width=True)
+
+    st.markdown("#### delete_room")
+    room_options = [row["room"] for row in rows]
+    selected_room = st.selectbox("selected_room:", options=room_options, key="admin_delete_room_select")
+    revoke_invites = st.toggle("revoke_invite_links_for_room", value=True, key="admin_revoke_invites_on_delete")
+    confirm_text = st.text_input("type_DELETE_to_confirm:", key="admin_delete_confirm")
+
+    if st.button("DELETE SELECTED ROOM", type="primary", key="admin_delete_room_button", use_container_width=True):
+        if confirm_text != "DELETE":
+            st.error("delete_blocked=confirmation_required")
+        else:
+            result = delete_room_everywhere(selected_room, revoke_invites=revoke_invites)
+            st.success(
+                "room_deleted=true | "
+                f"room={selected_room} | "
+                f"messages={result['deleted_messages']} | "
+                f"revoked_links={result['revoked_links']}"
+            )
+            st.rerun()
+
+
+def render_admin_panel() -> None:
     admin_password = get_secret("CHAT_ADMIN_PASSWORD", "")
     public_url = get_secret("PUBLIC_APP_URL", PUBLIC_APP_URL)
 
-    with st.sidebar.expander("admin_share_link", expanded=False):
+    with st.sidebar.expander("admin_panel", expanded=False):
         if not admin_password:
             st.error("CHAT_ADMIN_PASSWORD belum diset.")
             st.caption("Atur di Streamlit Secrets atau environment variable agar panel admin aktif.")
             st.code('CHAT_ADMIN_PASSWORD = "ganti-password-kuat"\nPUBLIC_APP_URL = "https://antitrust.streamlit.app"', language="toml")
             return
 
-        password = st.text_input("admin_password:", type="password", key="admin_password_input")
-        if not hmac.compare_digest(password, admin_password):
-            st.caption("Masukkan password admin untuk membuat link room.")
+        if not render_admin_login(admin_password):
+            st.caption("Login admin untuk melihat room aktif, menghapus room, dan membuat QR invite.")
             return
 
-        target_room = st.text_input("target_room:", placeholder="black-room-01", key="admin_target_room_input")
-        target_public_url = st.text_input(
-            "public_app_url:",
-            value=public_url,
-            placeholder="https://antitrust.streamlit.app",
-            key="admin_public_url_input",
-        )
+        st.success("admin_session=active")
+        if st.button("LOG OUT ADMIN", key="admin_logout_button", use_container_width=True):
+            for key in [
+                "admin_authenticated",
+                "admin_password_input",
+                "last_room_share_url",
+                "last_room_share_target",
+                "admin_delete_confirm",
+            ]:
+                st.session_state.pop(key, None)
+            st.success("admin_logout=success")
+            st.rerun()
 
-        if st.button("CREATE ROOM SHARE LINK", key="create_room_share_link", use_container_width=True):
-            clean_room = target_room.strip()
-            if not clean_room:
-                st.error("target_room tidak boleh kosong.")
-            else:
-                token = create_room_share_token(clean_room)
-                st.session_state["last_room_share_url"] = build_share_url(token, target_public_url)
-                st.success("share_link=created")
+        render_admin_create_link(public_url)
+        st.markdown("---")
+        render_admin_room_dashboard()
 
-        if st.session_state.get("last_room_share_url"):
-            st.code(st.session_state["last_room_share_url"], language="text")
-            st.caption("Bagikan link ini ke user. Room akan otomatis terkunci sesuai target_room.")
 
 def get_skull_image_data_uri() -> str:
     skull_path = Path(SKULL_IMAGE_FILE)
@@ -1207,7 +1421,7 @@ def main() -> None:
         st.warning("auto_destroy_completed=" + ",".join(destroyed_rooms))
 
     auto_refresh_enabled, refresh_seconds, sound_enabled = render_sidebar()
-    render_admin_share_panel()
+    render_admin_panel()
 
     if auto_refresh_enabled and st_autorefresh is not None:
         st_autorefresh(interval=refresh_seconds * 1000, key="antitrust_autorefresh")

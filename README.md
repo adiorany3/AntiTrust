@@ -4,9 +4,15 @@ Aplikasi chat private-room berbasis Streamlit dengan tema terminal hacker. Publi
 
 ## Fitur utama
 
+- Public channel dihapus: URL utama tanpa invite hanya menampilkan gambar tengkorak dan warning `public_channel=disabled | invite_required=true`.
+- Admin panel memakai login password dan session.
+- Admin dapat logout dari panel admin.
 - Admin dapat membuat share link untuk room tertentu.
 - Link memakai token invite: user membuka `https://antitrust.streamlit.app/?invite=TOKEN` dan room otomatis terkunci.
-- Public channel dihapus: tanpa invite link, halaman hanya menampilkan ASCII skull dan tidak membuka form room/chat.
+- Link share dapat langsung ditampilkan sebagai QR code PNG.
+- Admin dapat melihat room aktif, user yang sedang aktif, jumlah pesan, jumlah link invite, dan setting auto-destroy.
+- Admin dapat menghapus room dari dashboard admin.
+- Saat room dihapus, pesan, status online, setting room, file packet terenkripsi, dan invite link room tersebut dapat ikut dinonaktifkan.
 - Pesan teks terenkripsi dengan Fernet.
 - Image Packet, Voice Packet, dan Document Packet disimpan sebagai file terenkripsi di luar `chat_rooms.json` agar browser tidak lag saat file besar.
 - Preview gambar kecil memakai thumbnail.
@@ -47,26 +53,42 @@ export PUBLIC_APP_URL="http://localhost:8501"
 streamlit run app.py
 ```
 
-## Cara admin membuat link room
+## Cara admin membuat link dan QR room
 
-1. Buka app. Halaman utama tanpa invite hanya menampilkan ASCII skull karena public channel sudah dimatikan.
-2. Masuk ke sidebar `admin_share_link`.
+1. Buka app di `https://antitrust.streamlit.app/`.
+2. Buka sidebar `admin_panel`.
 3. Isi `admin_password`.
-4. Isi `target_room`, misalnya `black-room-01`.
-5. Klik `CREATE ROOM SHARE LINK`.
-6. Bagikan link yang muncul.
+4. Klik `LOGIN ADMIN`.
+5. Isi `target_room`, misalnya `black-room-01`.
+6. Klik `CREATE ROOM SHARE LINK`.
+7. Salin link invite atau download QR PNG yang muncul.
 
-Contoh hasil:
+Contoh hasil link:
 
 ```text
 https://antitrust.streamlit.app/?invite=TOKEN_RAHASIA
 ```
+
+## Cara admin melihat dan menghapus room aktif
+
+1. Login ke `admin_panel`.
+2. Bagian `active_rooms` menampilkan daftar room aktif secara default.
+3. Matikan toggle `show_only_active_rooms` jika ingin melihat semua room yang diketahui sistem.
+4. Pilih room pada `selected_room`.
+5. Biarkan `revoke_invite_links_for_room` aktif jika link invite room tersebut juga ingin dinonaktifkan.
+6. Ketik `DELETE` pada kolom konfirmasi.
+7. Klik `DELETE SELECTED ROOM`.
+
+## Logout admin
+
+Setelah selesai, klik `LOG OUT ADMIN` di `admin_panel`. Session admin akan dibersihkan dan panel kembali ke mode login.
 
 ## Catatan keamanan
 
 - Jangan commit `fernet.key` dari server produksi jika ingin menjaga data lama tetap privat.
 - File `private_links.json` menyimpan hash token, bukan token mentah.
 - Token invite hanya dapat dipakai selama `fernet.key` masih sama dan data `private_links.json` belum dihapus.
+- Jika room dihapus dengan opsi revoke aktif, semua invite link untuk room tersebut menjadi invalid.
 - Jika app diredeploy dan file runtime reset, link invite lama dapat hilang kecuali storage dipertahankan.
 
 ## Perilaku public URL
@@ -77,7 +99,7 @@ Jika user membuka URL utama tanpa token:
 https://antitrust.streamlit.app/
 ```
 
-Aplikasi hanya menampilkan gambar tengkorak ASCII dan status:
+Aplikasi hanya menampilkan gambar tengkorak dan status:
 
 ```text
 public_channel=disabled | invite_required=true
