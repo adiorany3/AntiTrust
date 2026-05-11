@@ -746,7 +746,7 @@ def render_admin_panel() -> None:
         return
 
     if not render_admin_login(admin_password):
-        st.caption("Login admin untuk melihat room aktif, menghapus room, dan membuat QR invite.")
+        st.caption("Top secrets")
         return
 
     st.success("admin_session=active")
