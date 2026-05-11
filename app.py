@@ -188,24 +188,87 @@ hr { border: none; border-top: 1px dashed var(--line); margin: .9rem 0; }
 .panic-copy { color: #ff9db1; margin: 2px 0 0 0; font-size: .88rem; }
 .cursor-blink { display: inline-block; width: 9px; height: 17px; background: var(--green); margin-left: 4px; animation: blink .85s infinite; }
 .skull-lock-frame {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
+  width: min(420px, 86vw);
+  min-height: 310px;
   background: #000;
   border: 1px solid var(--line);
   padding: 22px 12px;
-  margin-top: 18px;
-  box-shadow: 0 0 20px rgba(0,255,102,.16);
+  margin: 18px auto 0 auto;
+  overflow: hidden;
+  box-shadow: 0 0 20px rgba(0,255,102,.16), inset 0 0 32px rgba(0,255,102,.08);
+  animation: skull-frame-pulse 2.8s infinite steps(2, end);
+}
+.skull-lock-frame::before {
+  content: "";
+  position: absolute;
+  inset: -35% 0;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0,255,102,0),
+    rgba(0,255,102,0) 8px,
+    rgba(0,255,102,.16) 9px,
+    rgba(0,255,102,0) 11px
+  );
+  transform: translateY(-40%);
+  animation: hacker-scan 2.2s linear infinite;
+  pointer-events: none;
+  z-index: 2;
+}
+.skull-lock-frame::after {
+  content: "ACCESS DENIED";
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  color: rgba(0,255,102,.52);
+  font-size: .82rem;
+  letter-spacing: 3px;
+  text-shadow: 0 0 10px rgba(0,255,102,.7);
+  animation: hacker-text-flicker 1.6s infinite steps(2, end);
+  z-index: 3;
 }
 .skull-lock-img {
+  position: relative;
+  z-index: 1;
   display: block;
   width: min(320px, 78vw);
   max-width: 100%;
   height: auto;
   filter: drop-shadow(0 0 10px rgba(0,255,102,.72));
+  animation: skull-hacker-glitch 1.85s infinite steps(2, end), skull-float 4.2s ease-in-out infinite;
 }
 .ascii-lock-note { color: rgba(140,255,174,.72); text-align: center; margin-top: 8px; font-size: .9rem; }
+.admin-center-title { text-align: center; margin-top: 14px; }
+.admin-center-title h3 { color: var(--green); margin-bottom: 2px; letter-spacing: 1px; }
+.admin-center-note { text-align: center; color: rgba(140,255,174,.72); font-size: .9rem; margin-bottom: 12px; }
 @keyframes blink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
+@keyframes skull-float {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-8px) scale(1.025); }
+}
+@keyframes skull-hacker-glitch {
+  0%, 88%, 100% { filter: drop-shadow(0 0 10px rgba(0,255,102,.72)); opacity: 1; }
+  90% { filter: drop-shadow(-7px 0 0 rgba(0,255,102,.55)) drop-shadow(7px 0 0 rgba(255,51,92,.42)); opacity: .82; }
+  94% { filter: drop-shadow(5px 0 0 rgba(0,255,102,.62)) drop-shadow(-5px 0 0 rgba(255,51,92,.34)); opacity: 1; }
+}
+@keyframes hacker-scan {
+  0% { transform: translateY(-42%); opacity: .15; }
+  50% { opacity: .42; }
+  100% { transform: translateY(42%); opacity: .15; }
+}
+@keyframes skull-frame-pulse {
+  0%, 100% { box-shadow: 0 0 20px rgba(0,255,102,.16), inset 0 0 32px rgba(0,255,102,.08); }
+  50% { box-shadow: 0 0 34px rgba(0,255,102,.26), inset 0 0 42px rgba(0,255,102,.12); }
+}
+@keyframes hacker-text-flicker {
+  0%, 100% { opacity: .35; }
+  35% { opacity: .9; }
+  62% { opacity: .12; }
+}
 ::-webkit-scrollbar { width: 8px; }
 ::-webkit-scrollbar-track { background: #000; }
 ::-webkit-scrollbar-thumb { background: var(--green); }
@@ -665,37 +728,43 @@ def render_admin_panel() -> None:
     admin_password = get_secret("CHAT_ADMIN_PASSWORD", "")
     public_url = get_secret("PUBLIC_APP_URL", PUBLIC_APP_URL)
 
-    with st.sidebar.container():
-        st.markdown("---")
-        st.markdown("### admin_panel")
-        st.caption("panel=always_visible | collapse_removed=true")
-        if not admin_password:
-            st.error("CHAT_ADMIN_PASSWORD belum diset.")
-            st.caption("Atur di Streamlit Secrets atau environment variable agar panel admin aktif.")
-            st.code('CHAT_ADMIN_PASSWORD = "ganti-password-kuat"\nPUBLIC_APP_URL = "https://antitrust.streamlit.app"', language="toml")
-            return
+    st.markdown("---")
+    st.markdown(
+        """
+        <div class="admin-center-title">
+          <h3>admin_panel</h3>
+          <div class="admin-center-note">panel=always_visible | collapse_removed=true</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-        if not render_admin_login(admin_password):
-            st.caption("Login admin untuk melihat room aktif, menghapus room, dan membuat QR invite.")
-            return
+    if not admin_password:
+        st.error("CHAT_ADMIN_PASSWORD belum diset.")
+        st.caption("Atur di Streamlit Secrets atau environment variable agar panel admin aktif.")
+        st.code('CHAT_ADMIN_PASSWORD = "ganti-password-kuat"\nPUBLIC_APP_URL = "https://antitrust.streamlit.app"', language="toml")
+        return
 
-        st.success("admin_session=active")
-        if st.button("LOG OUT ADMIN", key="admin_logout_button", use_container_width=True):
-            for key in [
-                "admin_authenticated",
-                "admin_password_input",
-                "last_room_share_url",
-                "last_room_share_target",
-                "admin_delete_confirm",
-            ]:
-                st.session_state.pop(key, None)
-            st.success("admin_logout=success")
-            st.rerun()
+    if not render_admin_login(admin_password):
+        st.caption("Login admin untuk melihat room aktif, menghapus room, dan membuat QR invite.")
+        return
 
-        render_admin_create_link(public_url)
-        st.markdown("---")
-        render_admin_room_dashboard()
+    st.success("admin_session=active")
+    if st.button("LOG OUT ADMIN", key="admin_logout_button", use_container_width=True):
+        for key in [
+            "admin_authenticated",
+            "admin_password_input",
+            "last_room_share_url",
+            "last_room_share_target",
+            "admin_delete_confirm",
+        ]:
+            st.session_state.pop(key, None)
+        st.success("admin_logout=success")
+        st.rerun()
 
+    render_admin_create_link(public_url)
+    st.markdown("---")
+    render_admin_room_dashboard()
 
 def get_skull_image_data_uri() -> str:
     skull_path = Path(SKULL_IMAGE_FILE)
@@ -709,7 +778,7 @@ def get_skull_image_data_uri() -> str:
     return f"data:image/svg+xml;base64,{encoded}"
 
 
-def render_locked_landing() -> None:
+def render_locked_landing(show_admin_panel: bool = True) -> None:
     skull_src = get_skull_image_data_uri()
     st.markdown(
         f"""
@@ -720,6 +789,11 @@ def render_locked_landing() -> None:
         """,
         unsafe_allow_html=True,
     )
+
+    if show_admin_panel:
+        admin_left, admin_mid, admin_right = st.columns([0.18, 0.64, 0.18])
+        with admin_mid:
+            render_admin_panel()
 
 
 # ==============================
@@ -1424,7 +1498,6 @@ def main() -> None:
         st.warning("auto_destroy_completed=" + ",".join(destroyed_rooms))
 
     auto_refresh_enabled, refresh_seconds, sound_enabled = render_sidebar()
-    render_admin_panel()
 
     if auto_refresh_enabled and st_autorefresh is not None:
         st_autorefresh(interval=refresh_seconds * 1000, key="antitrust_autorefresh")

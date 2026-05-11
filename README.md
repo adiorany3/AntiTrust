@@ -4,9 +4,9 @@ Aplikasi chat private-room berbasis Streamlit dengan tema terminal hacker. Publi
 
 ## Fitur utama
 
-- Public channel dihapus: URL utama tanpa invite hanya menampilkan gambar tengkorak dan warning `public_channel=disabled | invite_required=true`.
+- Public channel dihapus: URL utama tanpa invite menampilkan gambar tengkorak bergerak/glitch dan warning `public_channel=disabled | invite_required=true`.
 - Admin panel memakai login password dan session.
-- Admin panel selalu tampil di sidebar tanpa expander/collapse agar tidak sulit dibuka kembali.
+- Admin panel tidak lagi tampil di sidebar; panel admin berada di tengah halaman, tepat di bawah gambar tengkorak, tanpa expander/collapse.
 - Admin dapat logout dari panel admin.
 - Admin dapat membuat share link untuk room tertentu.
 - Link memakai token invite: user membuka `https://antitrust.streamlit.app/?invite=TOKEN` dan room otomatis terkunci.
@@ -57,7 +57,7 @@ streamlit run app.py
 ## Cara admin membuat link dan QR room
 
 1. Buka app di `https://antitrust.streamlit.app/`.
-2. Sidebar `admin_panel` sudah tampil langsung tanpa perlu membuka expander.
+2. `admin_panel` tampil di tengah halaman, tepat di bawah gambar tengkorak, tanpa perlu membuka expander.
 3. Isi `admin_password`.
 4. Klik `LOGIN ADMIN`.
 5. Isi `target_room`, misalnya `black-room-01`.
@@ -87,7 +87,7 @@ Setelah selesai, klik `LOG OUT ADMIN` di `admin_panel`. Session admin akan diber
 ## Catatan keamanan
 
 - Jangan commit `fernet.key` dari server produksi jika ingin menjaga data lama tetap privat.
-- File `private_links.json` menyimpan hash token, bukan token mentah.
+- File `private_links.json` menyimpan data invite room terenkripsi. Jangan bagikan isi file ini.
 - Token invite hanya dapat dipakai selama `fernet.key` masih sama dan data `private_links.json` belum dihapus.
 - Jika room dihapus dengan opsi revoke aktif, semua invite link untuk room tersebut menjadi invalid.
 - Jika app diredeploy dan file runtime reset, link invite lama dapat hilang kecuali storage dipertahankan.
