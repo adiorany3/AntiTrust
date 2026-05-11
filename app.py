@@ -665,7 +665,10 @@ def render_admin_panel() -> None:
     admin_password = get_secret("CHAT_ADMIN_PASSWORD", "")
     public_url = get_secret("PUBLIC_APP_URL", PUBLIC_APP_URL)
 
-    with st.sidebar.expander("admin_panel", expanded=False):
+    with st.sidebar.container():
+        st.markdown("---")
+        st.markdown("### admin_panel")
+        st.caption("panel=always_visible | collapse_removed=true")
         if not admin_password:
             st.error("CHAT_ADMIN_PASSWORD belum diset.")
             st.caption("Atur di Streamlit Secrets atau environment variable agar panel admin aktif.")

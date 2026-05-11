@@ -6,6 +6,7 @@ Aplikasi chat private-room berbasis Streamlit dengan tema terminal hacker. Publi
 
 - Public channel dihapus: URL utama tanpa invite hanya menampilkan gambar tengkorak dan warning `public_channel=disabled | invite_required=true`.
 - Admin panel memakai login password dan session.
+- Admin panel selalu tampil di sidebar tanpa expander/collapse agar tidak sulit dibuka kembali.
 - Admin dapat logout dari panel admin.
 - Admin dapat membuat share link untuk room tertentu.
 - Link memakai token invite: user membuka `https://antitrust.streamlit.app/?invite=TOKEN` dan room otomatis terkunci.
@@ -56,7 +57,7 @@ streamlit run app.py
 ## Cara admin membuat link dan QR room
 
 1. Buka app di `https://antitrust.streamlit.app/`.
-2. Buka sidebar `admin_panel`.
+2. Sidebar `admin_panel` sudah tampil langsung tanpa perlu membuka expander.
 3. Isi `admin_password`.
 4. Klik `LOGIN ADMIN`.
 5. Isi `target_room`, misalnya `black-room-01`.
