@@ -1253,6 +1253,58 @@ def invite_seconds_left(token: str | None) -> int:
     return max(0, int(item.get("expires_at", 0)) - now_epoch())
 
 
+def clear_invite_display(*keys: str) -> None:
+    """Remove expired invite UI state so links disappear immediately."""
+    for key in keys:
+        st.session_state.pop(key, None)
+
+
+def force_landing_on_expired_invite() -> None:
+    """Clear invite query/state and return to the landing page."""
+    clear_invite_display(
+        "room_invite_url", "room_invite_token",
+        "public_invite_url", "public_invite_token", "public_room",
+        "last_invite", "last_invite_token", "last_room",
+    )
+    try:
+        st.query_params.clear()
+    except Exception:
+        pass
+    st.rerun()
+
+
+def render_expiring_invite_link(
+    *,
+    url_key: str,
+    token_key: str,
+    room_key: str | None = None,
+    input_key: str,
+    label: str = "Sisa waktu link",
+) -> bool:
+    """Render invite link only while it is active. Returns True when visible."""
+    invite_url = st.session_state.get(url_key)
+    token = st.session_state.get(token_key)
+    if not invite_url or not token:
+        return False
+    left = invite_seconds_left(token)
+    if left <= 0:
+        keys = [url_key, token_key]
+        if room_key:
+            keys.append(room_key)
+        clear_invite_display(*keys)
+        st.toast("Invite link sudah habis dan disembunyikan.")
+        st.rerun()
+    room_name = st.session_state.get(room_key) if room_key else None
+    st.text_input("Invite link", value=invite_url, key=input_key)
+    render_whatsapp_share(invite_url, room_name)
+    with st.expander("QR Invite", expanded=False):
+        render_qr_invite(invite_url)
+    render_countdown(label, left)
+    if st_autorefresh is not None:
+        st_autorefresh(interval=1000, limit=max(1, min(left + 2, 3700)), key=f"{token_key}_expire_tick")
+    return True
+
+
 def format_countdown(seconds: int) -> str:
     seconds = max(0, int(seconds))
     minutes, sec = divmod(seconds, 60)
@@ -1512,12 +1564,13 @@ def render_admin_panel() -> None:
                 st.session_state["last_invite_token"] = token
                 st.session_state["last_room"] = room
                 st.success("Room dan invite link berhasil dibuat.")
-        if st.session_state.get("last_invite"):
-            st.text_input("Invite link", value=st.session_state["last_invite"])
-            render_whatsapp_share(st.session_state["last_invite"], st.session_state.get("last_room"))
-            with st.expander("QR Invite", expanded=False):
-                render_qr_invite(st.session_state["last_invite"])
-            render_countdown("Sisa waktu link", invite_seconds_left(st.session_state.get("last_invite_token")))
+        if render_expiring_invite_link(
+            url_key="last_invite",
+            token_key="last_invite_token",
+            room_key="last_room",
+            input_key="admin_invite_box",
+            label="Sisa waktu link",
+        ):
             if st.session_state.get("last_room"):
                 render_countdown("Sisa waktu room", room_seconds_left(st.session_state.get("last_room")))
         if st.button("Logout admin", use_container_width=True):
@@ -1549,13 +1602,20 @@ def render_public_room_creator() -> None:
             st.session_state["public_room"] = room
             st.success("Room berhasil dibuat.")
         if st.session_state.get("public_invite_url"):
-            st.text_input("Invite link", value=st.session_state["public_invite_url"], key="public_invite_box")
-            render_whatsapp_share(st.session_state["public_invite_url"], st.session_state.get("public_room"))
-            with st.expander("QR Invite", expanded=False):
-                render_qr_invite(st.session_state["public_invite_url"])
+            left = invite_seconds_left(st.session_state.get("public_invite_token"))
+            if left <= 0:
+                clear_invite_display("public_invite_url", "public_invite_token", "public_room")
+                st.toast("Invite link sudah habis dan halaman kembali ke awal.")
+                st.rerun()
             col1, col2 = st.columns(2)
             with col1:
-                render_countdown("Sisa waktu link", invite_seconds_left(st.session_state.get("public_invite_token")))
+                render_expiring_invite_link(
+                    url_key="public_invite_url",
+                    token_key="public_invite_token",
+                    room_key="public_room",
+                    input_key="public_invite_box",
+                    label="Sisa waktu link",
+                )
             with col2:
                 render_countdown("Sisa waktu room", room_seconds_left(st.session_state.get("public_room")))
 
@@ -1593,11 +1653,12 @@ def render_room_invite_panel(room: str, username: str) -> None:
             st.session_state["room_invite_token"] = token
             st.success("Invite link dibuat.")
         if st.session_state.get("room_invite_url"):
-            st.text_input("Invite link", value=st.session_state["room_invite_url"], key="room_invite_url_box")
-            render_whatsapp_share(st.session_state["room_invite_url"], room)
-            with st.expander("QR Invite", expanded=False):
-                render_qr_invite(st.session_state["room_invite_url"])
-            render_countdown("Sisa waktu invite link", invite_seconds_left(st.session_state.get("room_invite_token")))
+            render_expiring_invite_link(
+                url_key="room_invite_url",
+                token_key="room_invite_token",
+                input_key="room_invite_url_box",
+                label="Sisa waktu invite link",
+            )
 
 
 def clear_destroy_countdown() -> None:
@@ -1885,6 +1946,14 @@ def main() -> None:
     invite_token = get_query_param("invite")
     room = resolve_invite(invite_token)
     if not room:
+        if invite_token:
+            clear_invite_display("room_invite_url", "room_invite_token")
+            try:
+                st.query_params.clear()
+            except Exception:
+                pass
+            st.toast("Invite link tidak aktif atau sudah habis.")
+            st.rerun()
         render_landing()
         return
     if room_is_expired(room):
@@ -1893,13 +1962,19 @@ def main() -> None:
         render_landing()
         return
 
-    st.markdown('<div class="hero"><span class="badge">🔐 aktif</span><span class="badge">60 menit</span><span class="badge">auto revoke</span><h1>AntiTrust Room</h1></div>', unsafe_allow_html=True)
     current_invite_left = invite_seconds_left(invite_token)
+    if current_invite_left <= 0:
+        st.toast("Invite link sudah habis. Kembali ke halaman awal.")
+        force_landing_on_expired_invite()
+
+    st.markdown('<div class="hero"><span class="badge">🔐 aktif</span><span class="badge">60 menit</span><span class="badge">auto revoke</span><h1>AntiTrust Room</h1></div>', unsafe_allow_html=True)
     col_timer1, col_timer2 = st.columns(2)
     with col_timer1:
         render_countdown("Sisa waktu room", room_seconds_left(room))
     with col_timer2:
         render_countdown("Sisa waktu invite link", current_invite_left)
+    if st_autorefresh is not None:
+        st_autorefresh(interval=1000, limit=max(1, min(current_invite_left + 2, 3700)), key="active_invite_expire_tick")
     username = get_locked_username(is_admin=bool(st.session_state.get("admin_ok")))
     if not username:
         return

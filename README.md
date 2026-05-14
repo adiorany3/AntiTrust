@@ -61,3 +61,8 @@ PY
 - Invite, fitur tambahan, file viewer, pengaturan, panic, dan destroy room dipindahkan ke satu **Panel room**.
 - Tinggi chat, countdown, form, tab, tombol, dan input dipadatkan.
 - Fitur v12 tetap dipertahankan.
+
+## Update v14 - Expired Link Reset
+- Jika sisa waktu invite link sudah `00:00`, link otomatis disembunyikan dari tampilan.
+- Halaman dengan query invite yang sudah habis otomatis dibersihkan dan kembali ke halaman awal.
+- QR Invite dan Share WhatsApp ikut hilang saat link expired.
