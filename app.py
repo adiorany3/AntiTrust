@@ -403,11 +403,11 @@ iframe[title="st.iframe"]{display:block!important;}
 .terminal-hero .muted{display:block!important;color:#9cffb8!important;opacity:.92;font-family:inherit;font-size:.82rem!important;margin-top:5px!important;}
 .terminal-cursor{display:inline-block;width:9px;height:1.05em;background:#00ff66;margin-left:5px;vertical-align:-2px;animation:terminal-blink .85s steps(2,start) infinite;box-shadow:0 0 10px rgba(0,255,102,.9);}
 @keyframes terminal-blink{50%{opacity:0;}}
-.terminal-card{border:1px solid rgba(0,255,102,.35)!important;border-radius:20px;padding:13px 14px;background:linear-gradient(180deg, rgba(0,0,0,.82), rgba(3,18,10,.78))!important;box-shadow:0 0 30px rgba(0,255,102,.10), inset 0 1px 0 rgba(255,255,255,.08)!important;color:#d7ffe2!important;}
+.terminal-card{border:1px solid rgba(0,255,102,.35)!important;border-radius:20px;padding:11px 14px 13px;background:linear-gradient(180deg, rgba(0,0,0,.82), rgba(3,18,10,.78))!important;box-shadow:0 0 30px rgba(0,255,102,.10), inset 0 1px 0 rgba(255,255,255,.08)!important;color:#d7ffe2!important;margin-top:-8px!important;}
 .terminal-card h3,.terminal-card p,.terminal-card span,.terminal-card label{color:#d7ffe2!important;}
 .terminal-card [data-testid="stWidgetLabel"]{color:#9cffb8!important;font-family:'SFMono-Regular','Consolas','Liberation Mono',monospace;}
 .terminal-card input{font-family:'SFMono-Regular','Consolas','Liberation Mono',monospace!important;}
-.terminal-note{font-family:'SFMono-Regular','Consolas','Liberation Mono',monospace;color:#00ff66!important;font-size:.78rem;margin-bottom:8px;opacity:.9;}
+.terminal-note{font-family:'SFMono-Regular','Consolas','Liberation Mono',monospace;color:#00ff66!important;font-size:.78rem;margin:-3px 0 7px;opacity:.9;}
 </style>
 """
 
