@@ -748,7 +748,7 @@ def get_locked_username(is_admin: bool = False) -> str | None:
         return None
 
     with st.form("lock-username-form"):
-        raw_name = st.text_input("Nama pengguna", placeholder="contoh: adiora", max_chars=40)
+        raw_name = st.text_input("Nama pengguna", placeholder="contoh: Ng4D1miN", max_chars=40)
         submitted = st.form_submit_button("Tetapkan nama pengguna", use_container_width=True)
     if not submitted:
         st.info("Isi dan tetapkan nama pengguna untuk masuk ke room. Setelah ditetapkan, nama tidak bisa diubah selama sesi ini.")
