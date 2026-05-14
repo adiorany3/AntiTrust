@@ -2026,6 +2026,60 @@ def render_message_form(room: str, username: str) -> None:
                         st.rerun()
 
 
+
+def render_packet_viewer(room: str, messages: list[dict[str, Any]]) -> None:
+    packets = [msg for msg in messages if str(msg.get("type", "")) in {"image", "audio", "document"}]
+    if not packets:
+        st.caption("Belum ada file/packet di room ini.")
+        return
+
+    st.markdown("**Packet Viewer**")
+    packet_map = {str(msg.get("id")): msg for msg in packets}
+    selected = st.selectbox(
+        "Pilih file",
+        options=list(reversed(list(packet_map.keys()))),
+        format_func=lambda mid: f"{packet_map[mid].get('type','packet')} · {packet_map[mid].get('filename','packet')} · {format_bytes(packet_map[mid].get('size_bytes',0))}",
+        key=f"packet_select::{room}",
+    )
+    msg = packet_map[selected]
+
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        if st.button("Buka", use_container_width=True, key=f"open_packet::{room}::{selected}"):
+            st.session_state[f"opened::{room}"] = selected
+    with c2:
+        if st.button("Tutup", use_container_width=True, key=f"close_packet::{room}::{selected}"):
+            if st.session_state.get(f"opened::{room}") == selected:
+                del st.session_state[f"opened::{room}"]
+            st.rerun()
+
+    if st.session_state.get(f"opened::{room}") != selected:
+        st.caption("File asli baru didekripsi setelah tombol Buka ditekan.")
+        return
+
+    data = read_packet(str(msg.get("packet_path", "")))
+    if data is None:
+        st.error("Packet tidak ditemukan atau gagal didekripsi.")
+        return
+
+    mime = str(msg.get("mime_type", "application/octet-stream"))
+    filename = safe_filename(str(msg.get("filename", "packet.bin")))
+    if msg.get("type") == "image":
+        st.image(data, caption=filename, use_container_width=True)
+    elif msg.get("type") == "audio":
+        st.audio(data, format=mime)
+    else:
+        st.caption(filename)
+
+    st.download_button(
+        "Download",
+        data=data,
+        file_name=filename,
+        mime=mime,
+        use_container_width=True,
+        key=f"download_packet::{room}::{selected}",
+    )
+
 def render_compact_room_panel(room: str, username: str, messages: list[dict[str, Any]]) -> None:
     with st.expander("Panel room", expanded=False):
         tab_invite, tab_features, tab_files, tab_security = st.tabs(["Invite", "Fitur", "File", "Aksi"])
