@@ -1,6 +1,6 @@
-# AntiTrust Secure Glass v8
+# AntiTrust Secure Glass v9
 
-Versi perbaikan AntiTrust dengan tampilan glass/iPhone-style, room sementara, invite link, enkripsi Fernet, validasi file lebih ketat, destroy room + revoke key, identitas terkunci, dan auto-revoke otomatis saat waktu room habis.
+Versi perbaikan AntiTrust dengan tampilan glass/iPhone-style, room sementara, invite link, enkripsi Fernet, validasi file lebih ketat, destroy room + revoke key, identitas terkunci, share invite via WhatsApp, dan auto-revoke otomatis saat waktu room habis.
 
 ## Fitur utama
 
@@ -9,6 +9,7 @@ Versi perbaikan AntiTrust dengan tampilan glass/iPhone-style, room sementara, in
 - **Room auto revoke saat waktu habis**: pesan, packet/file, status online, pengaturan room, dan semua invite link room otomatis dihancurkan/direvoke.
 - **Countdown live** untuk sisa waktu room dan invite link.
 - **Semua user di room bisa create invite link** untuk mengajak orang lain.
+- **Share invite via WhatsApp**: setiap invite link dapat langsung dibagikan ke WhatsApp dengan pesan otomatis.
 - **Invite link tidak bisa lebih lama dari sisa waktu room** dan tetap maksimal 60 menit.
 - **Tidak ada fitur tinggalkan room**: user tidak bisa keluar-masuk untuk mengganti nama atau mengakali akses percakapan.
 - **Hancurkan room + revoke key dengan countdown 3 detik**: setelah tombol ditekan, user masih bisa menekan Cancel sebelum room benar-benar dihancurkan dan invite link direvoke.

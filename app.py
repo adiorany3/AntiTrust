@@ -1028,6 +1028,22 @@ def build_invite_url(token: str) -> str:
     return f"{public_base_url()}?{urlencode({'invite': token})}"
 
 
+def build_whatsapp_share_url(invite_url: str, room: str | None = None) -> str:
+    room_label = f" untuk room {room}" if room else ""
+    text = (
+        f"Masuk ke AntiTrust{room_label}: {invite_url}\n\n"
+        "Catatan: link dan room bersifat sementara, maksimal aktif 60 menit."
+    )
+    return "https://wa.me/?" + urlencode({"text": text})
+
+
+def render_whatsapp_share(invite_url: str, room: str | None = None) -> None:
+    if not invite_url:
+        return
+    st.link_button("Bagikan invite via WhatsApp", build_whatsapp_share_url(invite_url, room), use_container_width=True)
+    st.caption("WhatsApp akan terbuka dengan pesan invite otomatis. Pilih kontak/grup tujuan untuk mengirim.")
+
+
 def get_query_param(name: str) -> str | None:
     try:
         value = st.query_params.get(name)
@@ -1162,6 +1178,7 @@ def render_admin_panel() -> None:
                 st.success("Room dan invite link berhasil dibuat.")
         if st.session_state.get("last_invite"):
             st.text_input("Invite link", value=st.session_state["last_invite"])
+            render_whatsapp_share(st.session_state["last_invite"], st.session_state.get("last_room"))
             render_countdown("Sisa waktu link", invite_seconds_left(st.session_state.get("last_invite_token")))
             if st.session_state.get("last_room"):
                 render_countdown("Sisa waktu room", room_seconds_left(st.session_state.get("last_room")))
@@ -1192,6 +1209,7 @@ def render_public_room_creator() -> None:
             st.success("Room berhasil dibuat.")
         if st.session_state.get("public_invite_url"):
             st.text_input("Invite link", value=st.session_state["public_invite_url"], key="public_invite_box")
+            render_whatsapp_share(st.session_state["public_invite_url"], st.session_state.get("public_room"))
             col1, col2 = st.columns(2)
             with col1:
                 render_countdown("Sisa waktu link", invite_seconds_left(st.session_state.get("public_invite_token")))
@@ -1233,6 +1251,7 @@ def render_room_invite_panel(room: str, username: str) -> None:
             st.success("Invite link dibuat.")
         if st.session_state.get("room_invite_url"):
             st.text_input("Invite link", value=st.session_state["room_invite_url"], key="room_invite_url_box")
+            render_whatsapp_share(st.session_state["room_invite_url"], room)
             render_countdown("Sisa waktu invite link", invite_seconds_left(st.session_state.get("room_invite_token")))
 
 
