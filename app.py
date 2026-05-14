@@ -870,7 +870,7 @@ def get_locked_username(is_admin: bool = False) -> str | None:
         return None
 
     with st.form("lock-username-form"):
-        raw_name = st.text_input("Nama pengguna", placeholder="contoh: Namamu", max_chars=40)
+        raw_name = st.text_input("Nama pengguna", placeholder="contoh: adiora", max_chars=40)
         submitted = st.form_submit_button("Tetapkan nama pengguna", use_container_width=True)
     if not submitted:
         st.info("Isi dan tetapkan nama pengguna untuk masuk ke room. Setelah ditetapkan, nama tidak bisa diubah selama sesi ini.")
@@ -1827,7 +1827,7 @@ def render_public_room_creator() -> None:
         st.caption("Maksimal 60 menit. Auto revoke saat waktu habis.")
         col_a, col_b = st.columns(2)
         with col_a:
-            creator = st.text_input("Nama pembuat", placeholder="Namamu", key="creator_name")
+            creator = st.text_input("Nama pembuat", placeholder="adiora", key="creator_name")
         with col_b:
             room = st.text_input("Nama room", placeholder="kelas-private-01", key="public_room_name")
         ttl = st.slider("Durasi room", min_value=1, max_value=ROOM_MAX_TTL_MINUTES, value=ROOM_DEFAULT_TTL_MINUTES, help="Maksimal 60 menit.", key="public_room_ttl")
@@ -1865,7 +1865,7 @@ def render_public_room_creator() -> None:
 
 def render_landing() -> None:
     st.markdown('<div class="hero"><span class="badge">🔐 secure</span><span class="badge">60 menit</span><span class="badge">auto revoke</span><h1>AntiTrust</h1><p class="muted">Room terenkripsi sementara. Share link, auto revoke.</p></div>', unsafe_allow_html=True)
-    st.caption("Bebas berbicara, namun silahkan pergunakan dengan bijak")
+    st.caption("Nama pengguna terkunci setelah ditetapkan. Dalam satu room, nama yang sama tidak bisa aktif bersamaan. Nama adioranye atau Galuh Adi Insani wajib login admin dan tampil badge khusus.")
     render_public_room_creator()
     with st.expander("Admin panel", expanded=False):
         render_admin_panel()
@@ -2167,17 +2167,8 @@ def render_message_form(room: str, username: str) -> None:
                     if clean_message and not rate_limited("text"):
                         append_text(room, username, clean_message, 0)
                         st.rerun()
-
-        with tab_ping:
-            st.caption("Kirim ping cepat untuk menarik perhatian user lain di room.")
-            if st.button("📡 Ping room", use_container_width=True, key="send_ping_btn"):
-                if not rate_limited("ping"):
-                    append_ping(room, username)
-                    st.toast("Ping terkirim.", icon="📡")
-                    st.rerun()
-                with tab_self:
-                
-        with st.form("self-destruct-message", clear_on_submit=True):
+        with tab_self:
+            with st.form("self-destruct-message", clear_on_submit=True):
                 sd_message = st.text_input(
                     "Pesan self-destruct",
                     placeholder="Tulis pesan sementara lalu tekan Enter...",
@@ -2197,6 +2188,13 @@ def render_message_form(room: str, username: str) -> None:
                     if clean_message and not rate_limited("self_destruct"):
                         append_text(room, username, clean_message, ttl_seconds)
                         st.rerun()
+        with tab_ping:
+            st.caption("Kirim ping cepat untuk menarik perhatian user lain di room.")
+            if st.button("📡 Ping room", use_container_width=True, key="send_ping_btn"):
+                if not rate_limited("ping"):
+                    append_ping(room, username)
+                    st.toast("Ping terkirim.", icon="📡")
+                    st.rerun()
         with tab_special:
             kind = st.selectbox("Jenis", ["Secret Note", "One-Time Message", "Poll Cepat", "Location Pin", "Checklist Bersama"], key="special_kind")
             if kind in {"Secret Note", "One-Time Message"}:
