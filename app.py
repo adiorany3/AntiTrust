@@ -1363,8 +1363,7 @@ def render_expiring_invite_link(
     with st.expander("QR Invite", expanded=False):
         render_qr_invite(invite_url)
     render_countdown(label, left)
-    if st_autorefresh is not None:
-        st_autorefresh(interval=1000, limit=max(1, min(left + 2, 3700)), key=f"{token_key}_expire_tick")
+    # Countdown berjalan di browser tanpa auto-refresh Streamlit, supaya halaman tidak lompat ke atas.
     return True
 
 
@@ -1376,16 +1375,18 @@ def format_countdown(seconds: int) -> str:
 
 def render_countdown(label: str, seconds_left: int) -> None:
     safe_label = html.escape(label)
+    safe_id = "countdown_" + hashlib.sha1(f"{label}:{seconds_left}:{time.time_ns()}".encode()).hexdigest()[:12]
     components.html(
         f"""
         <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;border:1px solid rgba(255,255,255,.22);border-radius:15px;padding:5px 8px;background:rgba(255,255,255,.10);backdrop-filter:blur(18px);color:inherit">
           <div style="font-size:10px;opacity:.72;margin-bottom:0">{safe_label}</div>
-          <div id="countdown" style="font-size:16px;font-weight:800;letter-spacing:-.04em">{format_countdown(seconds_left)}</div>
+          <div id="{safe_id}" style="font-size:16px;font-weight:800;letter-spacing:-.04em">{format_countdown(seconds_left)}</div>
         </div>
         <script>
           let left = {max(0, int(seconds_left))};
-          const el = document.getElementById('countdown');
+          const el = document.getElementById('{safe_id}');
           function tick() {{
+            if (!el) return;
             const m = Math.floor(left / 60).toString().padStart(2, '0');
             const s = (left % 60).toString().padStart(2, '0');
             el.textContent = `${{m}}:${{s}}`;
@@ -1490,8 +1491,9 @@ def render_chat(messages: list[dict[str, Any]], username: str) -> str:
         return CHAT_CSS + """
         <div id="antitrust-chat-box" class="chat"><div class="empty">Belum ada pesan. Mulai percakapan aman.</div><div id="antitrust-chat-bottom"></div></div>
         <script>
+          // Scroll hanya di dalam kotak chat, bukan scroll halaman browser.
           const box = document.getElementById('antitrust-chat-box');
-          if (box) box.scrollTop = box.scrollHeight;
+          if (box) requestAnimationFrame(() => { box.scrollTop = box.scrollHeight; });
         </script>
         """
     rows = ""
@@ -1552,12 +1554,11 @@ def render_chat(messages: list[dict[str, Any]], username: str) -> str:
     <div id="antitrust-chat-box" class="chat">{rows}<div id="antitrust-chat-bottom"></div></div>
     <script>
       const box = document.getElementById('antitrust-chat-box');
-      const bottom = document.getElementById('antitrust-chat-bottom');
       function scrollLatest() {{
+        // Jangan panggil scrollIntoView karena itu menggeser halaman utama Streamlit.
         if (box) box.scrollTop = box.scrollHeight;
-        if (bottom) bottom.scrollIntoView({{block:'end'}});
       }}
-      scrollLatest();
+      requestAnimationFrame(scrollLatest);
       setTimeout(scrollLatest, 80);
       setTimeout(scrollLatest, 240);
     </script>
@@ -1739,10 +1740,12 @@ def render_landing() -> None:
 
 def render_sidebar() -> tuple[bool, int, bool]:
     st.sidebar.title("🔐 AntiTrust")
-    auto_refresh = st.sidebar.toggle("Auto refresh", value=True)
-    interval = st.sidebar.selectbox("Interval", [3, 5, 10, 15], index=1)
+    auto_refresh = st.sidebar.toggle("Auto refresh chat", value=False, help="Matikan default agar halaman tidak lompat ke atas. Aktifkan hanya jika perlu memantau pesan tanpa klik refresh.")
+    interval = st.sidebar.selectbox("Interval", [10, 15, 30, 60], index=1)
     sound = st.sidebar.toggle("Suara pesan baru", value=True)
-    st.sidebar.caption("Secrets/env only.")
+    if st.sidebar.button("Refresh manual", use_container_width=True):
+        st.rerun()
+    st.sidebar.caption("Auto refresh default mati agar tampilan stabil.")
     return auto_refresh, interval, sound
 
 
@@ -2095,6 +2098,32 @@ def render_compact_room_panel(room: str, username: str, messages: list[dict[str,
             render_panic(room)
 
 
+def render_invite_expiry_redirect(seconds_left: int) -> None:
+    """Client-only redirect when invite reaches zero without causing periodic Streamlit refresh."""
+    left = max(0, int(seconds_left))
+    if left <= 0:
+        return
+    components.html(
+        f"""
+        <script>
+        (function(){{
+          const delay = Math.max(1, {left}) * 1000 + 350;
+          setTimeout(function(){{
+            try {{
+              const url = new URL(window.parent.location.href);
+              if (url.searchParams.has('invite')) {{
+                url.searchParams.delete('invite');
+                window.parent.location.href = url.origin + url.pathname + (url.search ? url.search : '');
+              }}
+            }} catch(e) {{}}
+          }}, delay);
+        }})();
+        </script>
+        """,
+        height=0,
+    )
+
+
 def main() -> None:
     ensure_dirs()
     st.set_page_config(page_title=APP_TITLE, page_icon=APP_ICON, layout="centered")
@@ -2136,8 +2165,8 @@ def main() -> None:
         render_countdown("Sisa waktu room", room_seconds_left(room))
     with col_timer2:
         render_countdown("Sisa waktu invite link", current_invite_left)
-    if st_autorefresh is not None:
-        st_autorefresh(interval=1000, limit=max(1, min(current_invite_left + 2, 3700)), key="active_invite_expire_tick")
+    render_invite_expiry_redirect(current_invite_left)
+    # Jangan auto-refresh tiap detik; countdown berjalan di browser agar halaman tidak naik sendiri.
     username = get_locked_username(is_admin=bool(st.session_state.get("admin_ok")))
     if not username:
         return

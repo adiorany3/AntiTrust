@@ -85,3 +85,9 @@ PY
 - Suara pesan masuk ditambahkan untuk pesan baru dari user lain.
 - Browser perlu klik tombol **Aktifkan suara pesan masuk** satu kali agar audio diizinkan.
 - Jika username yang dikunci ternyata sudah dipakai user lain dalam room yang sama, sistem otomatis refresh, mengosongkan username, lalu menampilkan kolom username agar bisa langsung diperbaiki.
+
+## v17.3 stability hotfix
+- Auto refresh chat sekarang default mati agar halaman tidak lompat/naik sendiri.
+- Countdown invite/room berjalan client-side tanpa refresh Streamlit tiap detik.
+- Auto-scroll hanya menggeser kotak chat ke pesan terbaru, bukan halaman browser utama.
+- Tersedia tombol Refresh manual di sidebar.
