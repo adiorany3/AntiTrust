@@ -1642,6 +1642,51 @@ def render_sound_notice(signature: str, enabled: bool) -> None:
     )
 
 
+def render_admin_panel() -> None:
+    admin_password = get_secret("CHAT_ADMIN_PASSWORD", "")
+    with st.container(border=True):
+        st.subheader("Admin")
+        if not admin_password:
+            st.error("Set CHAT_ADMIN_PASSWORD di Streamlit Secrets atau environment variable dulu.")
+            st.code('CHAT_ADMIN_PASSWORD = "password-yang-kuat"\nFERNET_KEY = "hasil-generate-fernet-key"\nPUBLIC_APP_URL = "https://nama-app.streamlit.app"')
+            return
+        if not st.session_state.get("admin_ok"):
+            password = st.text_input("Password admin", type="password")
+            if st.button("Login admin", use_container_width=True):
+                if hmac.compare_digest(password, admin_password):
+                    st.session_state["admin_ok"] = True
+                    st.rerun()
+                else:
+                    st.error("Password salah.")
+            return
+
+        st.success("Admin aktif")
+        room = st.text_input("Nama room tujuan", placeholder="kelas-private-01")
+        ttl = st.slider("Masa aktif room & invite link", min_value=1, max_value=ROOM_MAX_TTL_MINUTES, value=ROOM_DEFAULT_TTL_MINUTES, help="Maksimal 1 jam. Saat waktu habis, room otomatis dihancurkan dan semua invite link direvoke.")
+        if st.button("Buat room + invite link", use_container_width=True):
+            room = clean_room_name(room)
+            if not room:
+                st.warning("Nama room tidak boleh kosong.")
+            else:
+                token = create_room_with_invite(room, int(ttl), "admin")
+                st.session_state["last_invite"] = build_invite_url(token)
+                st.session_state["last_invite_token"] = token
+                st.session_state["last_room"] = room
+                st.success("Room dan invite link berhasil dibuat.")
+        if render_expiring_invite_link(
+            url_key="last_invite",
+            token_key="last_invite_token",
+            room_key="last_room",
+            input_key="admin_invite_box",
+            label="Sisa waktu link",
+        ):
+            if st.session_state.get("last_room"):
+                render_countdown("Sisa waktu room", room_seconds_left(st.session_state.get("last_room")))
+        if st.button("Logout admin", use_container_width=True):
+            st.session_state.pop("admin_ok", None)
+            st.rerun()
+
+
 def render_public_room_creator() -> None:
     with st.container(border=True):
         st.subheader("Buat room")
