@@ -2167,8 +2167,17 @@ def render_message_form(room: str, username: str) -> None:
                     if clean_message and not rate_limited("text"):
                         append_text(room, username, clean_message, 0)
                         st.rerun()
-        with tab_self:
-            with st.form("self-destruct-message", clear_on_submit=True):
+
+        with tab_ping:
+            st.caption("Kirim ping cepat untuk menarik perhatian user lain di room.")
+            if st.button("📡 Ping room", use_container_width=True, key="send_ping_btn"):
+                if not rate_limited("ping"):
+                    append_ping(room, username)
+                    st.toast("Ping terkirim.", icon="📡")
+                    st.rerun()
+                with tab_self:
+                
+        with st.form("self-destruct-message", clear_on_submit=True):
                 sd_message = st.text_input(
                     "Pesan self-destruct",
                     placeholder="Tulis pesan sementara lalu tekan Enter...",
@@ -2188,13 +2197,6 @@ def render_message_form(room: str, username: str) -> None:
                     if clean_message and not rate_limited("self_destruct"):
                         append_text(room, username, clean_message, ttl_seconds)
                         st.rerun()
-        with tab_ping:
-            st.caption("Kirim ping cepat untuk menarik perhatian user lain di room.")
-            if st.button("📡 Ping room", use_container_width=True, key="send_ping_btn"):
-                if not rate_limited("ping"):
-                    append_ping(room, username)
-                    st.toast("Ping terkirim.", icon="📡")
-                    st.rerun()
         with tab_special:
             kind = st.selectbox("Jenis", ["Secret Note", "One-Time Message", "Poll Cepat", "Location Pin", "Checklist Bersama"], key="special_kind")
             if kind in {"Secret Note", "One-Time Message"}:
