@@ -79,3 +79,9 @@ PY
 - Sistem mengecek username aktif sebelum user masuk ke percakapan.
 - Jika nama sudah dipakai user lain di room yang sama, chat ditahan dan muncul notifikasi untuk memakai nama lain atau menunggu sesi lama tidak aktif.
 - Format data online dibuat kompatibel dengan versi lama dan otomatis dibersihkan dari sesi yang sudah tidak aktif.
+
+## Update v17 - Auto Scroll, Incoming Sound, Username Conflict Reset
+- Chat box otomatis scroll ke pesan terbaru setiap render/refresh.
+- Suara pesan masuk ditambahkan untuk pesan baru dari user lain.
+- Browser perlu klik tombol **Aktifkan suara pesan masuk** satu kali agar audio diizinkan.
+- Jika username yang dikunci ternyata sudah dipakai user lain dalam room yang sama, sistem otomatis refresh, mengosongkan username, lalu menampilkan kolom username agar bisa langsung diperbaiki.

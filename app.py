@@ -748,6 +748,10 @@ def username_with_badge_html(username: str) -> str:
 
 
 def get_locked_username(is_admin: bool = False) -> str | None:
+    conflict_message = st.session_state.pop("username_conflict_message", "")
+    if conflict_message:
+        st.warning(conflict_message)
+
     locked = normalize_display_name(st.session_state.get("username", ""))[:40]
     if locked:
         if is_reserved_display_name(locked) and not st.session_state.get("admin_ok"):
@@ -1483,7 +1487,13 @@ def user_hue(username: str) -> int:
 
 def render_chat(messages: list[dict[str, Any]], username: str) -> str:
     if not messages:
-        return CHAT_CSS + '<div class="chat"><div class="empty">Belum ada pesan. Mulai percakapan aman.</div></div>'
+        return CHAT_CSS + """
+        <div id="antitrust-chat-box" class="chat"><div class="empty">Belum ada pesan. Mulai percakapan aman.</div><div id="antitrust-chat-bottom"></div></div>
+        <script>
+          const box = document.getElementById('antitrust-chat-box');
+          if (box) box.scrollTop = box.scrollHeight;
+        </script>
+        """
     rows = ""
     pinned = [m for m in messages if m.get("_pinned")]
     for msg in messages[-120:]:
@@ -1538,7 +1548,20 @@ def render_chat(messages: list[dict[str, Any]], username: str) -> str:
         me_label = '<span>kamu</span>' if is_me else ''
         pin_label = '<span>📌</span>' if pin else ''
         rows += f'<div class="{cls}"><div class="bubble"{bubble_style}>{content}<div class="meta">{dot}<span>{sender_label}</span>{me_label}{pin_label}<span>{time_label}</span></div></div></div>'
-    return CHAT_CSS + f'<div class="chat">{rows}</div>'
+    return CHAT_CSS + f"""
+    <div id="antitrust-chat-box" class="chat">{rows}<div id="antitrust-chat-bottom"></div></div>
+    <script>
+      const box = document.getElementById('antitrust-chat-box');
+      const bottom = document.getElementById('antitrust-chat-bottom');
+      function scrollLatest() {{
+        if (box) box.scrollTop = box.scrollHeight;
+        if (bottom) bottom.scrollIntoView({{block:'end'}});
+      }}
+      scrollLatest();
+      setTimeout(scrollLatest, 80);
+      setTimeout(scrollLatest, 240);
+    </script>
+    """
 
 
 def latest_foreign_signature(messages: list[dict[str, Any]], username: str) -> str:
@@ -1549,104 +1572,74 @@ def latest_foreign_signature(messages: list[dict[str, Any]], username: str) -> s
 
 
 def render_sound_notice(signature: str, enabled: bool) -> None:
-    if not enabled or not signature:
+    """Browser-side incoming-message sound.
+
+    The first click enables audio for the browser tab. After that, every new
+    foreign message signature plays a short iOS-like beep on refresh.
+    """
+    if not enabled:
         return
-    safe_sig = html.escape(signature, quote=True)
+    safe_sig = html.escape(signature or "", quote=True)
     components.html(
         f"""
-        <button id="enable" style="border:1px solid var(--line,#d9dee8);border-radius:999px;padding:8px 12px;background:var(--surface,#fff);color:var(--text,#172033);cursor:pointer">Aktifkan suara notifikasi</button>
+        <div id="sound-wrap" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;margin:0;padding:0">
+          <button id="sound-toggle" style="width:100%;border:1px solid rgba(120,145,180,.28);border-radius:999px;padding:6px 10px;background:rgba(255,255,255,.14);color:inherit;cursor:pointer;font-size:12px;font-weight:800;backdrop-filter:blur(14px)">🔔 Aktifkan suara pesan masuk</button>
+          <span id="sound-state" style="display:block;margin-top:3px;font-size:10px;opacity:.68;text-align:center"></span>
+        </div>
         <script>
-        const key='antitrust-last-sound';
-        const sig='{safe_sig}';
-        function beep(){{
-          const ctx=new(window.AudioContext||window.webkitAudioContext)();
-          const osc=ctx.createOscillator(); const gain=ctx.createGain();
-          osc.frequency.value=880; gain.gain.value=0.05;
-          osc.connect(gain); gain.connect(ctx.destination); osc.start();
-          setTimeout(()=>{{osc.stop();ctx.close();}},120);
-        }}
-        document.getElementById('enable').onclick=()=>{{localStorage.setItem('antitrust-sound','1');beep();}};
-        if(localStorage.getItem('antitrust-sound')==='1' && localStorage.getItem(key)!==sig){{beep();localStorage.setItem(key,sig);}}
+        (function(){{
+          const sig = '{safe_sig}';
+          const enabledKey = 'antitrust_sound_enabled_v2';
+          const lastKey = 'antitrust_last_foreign_message_v2';
+          const btn = document.getElementById('sound-toggle');
+          const state = document.getElementById('sound-state');
+          function storageGet(k){{ try{{return window.localStorage.getItem(k)}}catch(e){{return window.sessionStorage.getItem(k)}} }}
+          function storageSet(k,v){{ try{{window.localStorage.setItem(k,v)}}catch(e){{window.sessionStorage.setItem(k,v)}} }}
+          function beep(){{
+            try{{
+              const Ctx = window.AudioContext || window.webkitAudioContext;
+              const ctx = new Ctx();
+              const gain = ctx.createGain();
+              gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+              gain.gain.exponentialRampToValueAtTime(0.075, ctx.currentTime + 0.018);
+              gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.22);
+              gain.connect(ctx.destination);
+              [880, 1175].forEach((freq, i) => {{
+                const osc = ctx.createOscillator();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(freq, ctx.currentTime + i * 0.055);
+                osc.connect(gain);
+                osc.start(ctx.currentTime + i * 0.055);
+                osc.stop(ctx.currentTime + 0.20 + i * 0.055);
+              }});
+              setTimeout(() => ctx.close(), 420);
+            }}catch(e){{}}
+          }}
+          function refreshUI(){{
+            const on = storageGet(enabledKey) === '1';
+            btn.textContent = on ? '🔔 Suara pesan aktif' : '🔔 Aktifkan suara pesan masuk';
+            if(state) state.textContent = on ? 'Notifikasi akan berbunyi saat ada pesan baru dari user lain.' : 'Klik sekali agar browser mengizinkan suara.';
+          }}
+          btn.addEventListener('click', () => {{
+            storageSet(enabledKey, '1');
+            if (sig) storageSet(lastKey, sig);
+            beep();
+            refreshUI();
+          }});
+          refreshUI();
+          const on = storageGet(enabledKey) === '1';
+          const last = storageGet(lastKey) || '';
+          if (on && sig && last && last !== sig) {{
+            beep();
+            storageSet(lastKey, sig);
+          }} else if (on && sig && !last) {{
+            storageSet(lastKey, sig);
+          }}
+        }})();
         </script>
         """,
-        height=45,
+        height=52,
     )
-
-
-def render_packet_viewer(room: str, messages: list[dict[str, Any]]) -> None:
-    packets = [msg for msg in messages if str(msg.get("type", "")) in {"image", "audio", "document"}]
-    if not packets:
-        return
-    with st.container(border=True):
-        st.markdown("**Packet Viewer**")
-        packet_map = {str(msg.get("id")): msg for msg in packets}
-        selected = st.selectbox(
-            "Pilih file terenkripsi",
-            options=list(reversed(list(packet_map.keys()))),
-            format_func=lambda mid: f"{packet_map[mid].get('type','packet')} · {packet_map[mid].get('filename','packet')} · {format_bytes(packet_map[mid].get('size_bytes',0))}",
-        )
-        msg = packet_map[selected]
-        if st.button("Buka packet", use_container_width=True):
-            st.session_state[f"opened::{room}"] = selected
-        if st.session_state.get(f"opened::{room}") != selected:
-            st.caption("File asli baru didekripsi setelah tombol dibuka.")
-            return
-        data = read_packet(str(msg.get("packet_path", "")))
-        if data is None:
-            st.error("Packet tidak ditemukan atau gagal didekripsi.")
-            return
-        mime = str(msg.get("mime_type", "application/octet-stream"))
-        filename = safe_filename(str(msg.get("filename", "packet.bin")))
-        if msg.get("type") == "image":
-            st.image(data, caption=filename, width=420)
-        elif msg.get("type") == "audio":
-            st.audio(data, format=mime)
-        st.download_button("Download packet", data=data, file_name=filename, mime=mime, use_container_width=True)
-
-
-def render_admin_panel() -> None:
-    admin_password = get_secret("CHAT_ADMIN_PASSWORD", "")
-    with st.container(border=True):
-        st.subheader("Admin")
-        if not admin_password:
-            st.error("Set CHAT_ADMIN_PASSWORD di Streamlit Secrets atau environment variable dulu.")
-            st.code('CHAT_ADMIN_PASSWORD = "password-yang-kuat"\nFERNET_KEY = "hasil-generate-fernet-key"\nPUBLIC_APP_URL = "https://nama-app.streamlit.app"')
-            return
-        if not st.session_state.get("admin_ok"):
-            password = st.text_input("Password admin", type="password")
-            if st.button("Login admin", use_container_width=True):
-                if hmac.compare_digest(password, admin_password):
-                    st.session_state["admin_ok"] = True
-                    st.rerun()
-                else:
-                    st.error("Password salah.")
-            return
-
-        st.success("Admin aktif")
-        room = st.text_input("Nama room tujuan", placeholder="kelas-private-01")
-        ttl = st.slider("Masa aktif room & invite link", min_value=1, max_value=ROOM_MAX_TTL_MINUTES, value=ROOM_DEFAULT_TTL_MINUTES, help="Maksimal 1 jam. Saat waktu habis, room otomatis dihancurkan dan semua invite link direvoke.")
-        if st.button("Buat room + invite link", use_container_width=True):
-            room = clean_room_name(room)
-            if not room:
-                st.warning("Nama room tidak boleh kosong.")
-            else:
-                token = create_room_with_invite(room, int(ttl), "admin")
-                st.session_state["last_invite"] = build_invite_url(token)
-                st.session_state["last_invite_token"] = token
-                st.session_state["last_room"] = room
-                st.success("Room dan invite link berhasil dibuat.")
-        if render_expiring_invite_link(
-            url_key="last_invite",
-            token_key="last_invite_token",
-            room_key="last_room",
-            input_key="admin_invite_box",
-            label="Sisa waktu link",
-        ):
-            if st.session_state.get("last_room"):
-                render_countdown("Sisa waktu room", room_seconds_left(st.session_state.get("last_room")))
-        if st.button("Logout admin", use_container_width=True):
-            st.session_state.pop("admin_ok", None)
-            st.rerun()
 
 
 def render_public_room_creator() -> None:
@@ -2052,9 +2045,11 @@ def main() -> None:
 
     taken_by = username_taken_in_room(room, username)
     if taken_by:
-        st.error(f"Nama pengguna '{taken_by}' sedang digunakan di room ini. Gunakan nama lain untuk masuk room lain, atau tunggu sampai sesi pengguna tersebut tidak aktif.")
-        st.info("Nama yang sama tidak boleh aktif bersamaan dalam satu room chat agar identitas pengirim tidak membingungkan.")
-        return
+        st.session_state.pop("username", None)
+        st.session_state["username_conflict_message"] = (
+            f"Nama '{taken_by}' sedang digunakan di room ini. Silakan isi username lain untuk lanjut chat."
+        )
+        st.rerun()
 
     if room_is_expired(room):
         destroy_room_and_revoke(room)
