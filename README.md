@@ -124,3 +124,9 @@ PY
 - Ping tampil sebagai bubble khusus di chat.
 - Ping ikut memicu suara pesan masuk untuk user lain, jika suara sudah diaktifkan di browser.
 - Ping memakai rate limit agar tidak mudah spam.
+
+
+## Update v17.9
+- Tab **Self-destruct** dipisahkan dari tab **Text**.
+- Pesan biasa tidak lagi memakai pilihan self-destruct, sehingga form utama lebih stabil saat auto-refresh.
+- Pesan self-destruct tetap tersedia di tab tersendiri dengan pilihan waktu hilang.

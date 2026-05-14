@@ -2025,9 +2025,7 @@ def render_feature_panel(room: str, username: str, messages: list[dict[str, Any]
 def render_message_form(room: str, username: str) -> None:
     with st.container(border=True):
         st.markdown("**Kirim**")
-        ttl_label = st.selectbox("Self-destruct pesan", list(MESSAGE_SELF_DESTRUCT_CHOICES.keys()), index=0, key="message_ttl")
-        ttl_seconds = int(MESSAGE_SELF_DESTRUCT_CHOICES.get(ttl_label, 0))
-        tab_text, tab_ping, tab_special, tab_img, tab_voice, tab_doc = st.tabs(["Text", "Ping", "Secret", "Image", "Voice", "Doc"])
+        tab_text, tab_self, tab_ping, tab_special, tab_img, tab_voice, tab_doc = st.tabs(["Text", "Self-destruct", "Ping", "Secret", "Image", "Voice", "Doc"])
         with tab_text:
             with st.form("text-message", clear_on_submit=True):
                 message = st.text_input(
@@ -2040,6 +2038,27 @@ def render_message_form(room: str, username: str) -> None:
                 if submitted:
                     clean_message = (message or "").strip()
                     if clean_message and not rate_limited("text"):
+                        append_text(room, username, clean_message, 0)
+                        st.rerun()
+        with tab_self:
+            with st.form("self-destruct-message", clear_on_submit=True):
+                sd_message = st.text_input(
+                    "Pesan self-destruct",
+                    placeholder="Tulis pesan sementara lalu tekan Enter...",
+                    max_chars=MAX_TEXT_LENGTH,
+                    key="self_destruct_message_input",
+                )
+                ttl_label = st.selectbox(
+                    "Hilang setelah",
+                    list(MESSAGE_SELF_DESTRUCT_CHOICES.keys())[1:],
+                    index=0,
+                    key="self_destruct_ttl",
+                )
+                ttl_seconds = int(MESSAGE_SELF_DESTRUCT_CHOICES.get(ttl_label, 60))
+                submitted = st.form_submit_button("Kirim self-destruct", use_container_width=True)
+                if submitted:
+                    clean_message = (sd_message or "").strip()
+                    if clean_message and not rate_limited("self_destruct"):
                         append_text(room, username, clean_message, ttl_seconds)
                         st.rerun()
         with tab_ping:
@@ -2057,7 +2076,7 @@ def render_message_form(room: str, username: str) -> None:
                     submitted = st.form_submit_button("Kirim secret", use_container_width=True)
                     if submitted and not rate_limited("secret"):
                         msg_type = "secret_note" if kind == "Secret Note" else "one_time"
-                        append_special_message(room, username, msg_type, {"text": encrypt_text(secret_text.strip()[:MAX_TEXT_LENGTH])}, ttl_seconds)
+                        append_special_message(room, username, msg_type, {"text": encrypt_text(secret_text.strip()[:MAX_TEXT_LENGTH])}, 0)
                         st.rerun()
             elif kind == "Poll Cepat":
                 with st.form("special-poll", clear_on_submit=True):
@@ -2069,7 +2088,7 @@ def render_message_form(room: str, username: str) -> None:
                         if not question.strip() or len(options) < 2:
                             st.warning("Poll butuh pertanyaan dan minimal 2 opsi.")
                         else:
-                            append_special_message(room, username, "poll", {"question": encrypt_text(question.strip()[:160]), "options": [encrypt_text(o) for o in options], "votes": {}}, ttl_seconds)
+                            append_special_message(room, username, "poll", {"question": encrypt_text(question.strip()[:160]), "options": [encrypt_text(o) for o in options], "votes": {}}, 0)
                             st.rerun()
             elif kind == "Location Pin":
                 with st.form("special-location", clear_on_submit=True):
@@ -2080,7 +2099,7 @@ def render_message_form(room: str, username: str) -> None:
                         if not url.startswith(("https://", "http://")):
                             st.warning("Masukkan link lokasi yang valid.")
                         else:
-                            append_special_message(room, username, "location", {"label": encrypt_text((label or "Lokasi").strip()[:80]), "url": encrypt_text(url.strip()[:500])}, ttl_seconds)
+                            append_special_message(room, username, "location", {"label": encrypt_text((label or "Lokasi").strip()[:80]), "url": encrypt_text(url.strip()[:500])}, 0)
                             st.rerun()
             else:
                 with st.form("special-checklist", clear_on_submit=True):
@@ -2092,7 +2111,7 @@ def render_message_form(room: str, username: str) -> None:
                         if not items:
                             st.warning("Checklist minimal punya 1 item.")
                         else:
-                            append_special_message(room, username, "checklist", {"title": encrypt_text((title or "Checklist").strip()[:120]), "items": [encrypt_text(i) for i in items], "checked": {}}, ttl_seconds)
+                            append_special_message(room, username, "checklist", {"title": encrypt_text((title or "Checklist").strip()[:120]), "items": [encrypt_text(i) for i in items], "checked": {}}, 0)
                             st.rerun()
         with tab_img:
             image = st.file_uploader("Image", type=list(ALLOWED_IMAGE_TYPES))
