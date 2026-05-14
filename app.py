@@ -868,17 +868,59 @@ def mark_room_active(room: str) -> None:
     save_room_config(room, config)
 
 
+def get_session_id() -> str:
+    session_id = st.session_state.get("client_session_id")
+    if not session_id:
+        session_id = secrets.token_hex(16)
+        st.session_state["client_session_id"] = session_id
+    return str(session_id)
+
+
+def normalize_online_entries(raw_room: Any, now: int | None = None) -> dict[str, dict[str, Any]]:
+    """Normalize old/new online data and keep only active sessions."""
+    now = now_epoch() if now is None else int(now)
+    active: dict[str, dict[str, Any]] = {}
+    if not isinstance(raw_room, dict):
+        return active
+    for key, value in raw_room.items():
+        if isinstance(value, dict):
+            username = normalize_display_name(value.get("username", ""))
+            last_seen = int(value.get("last_seen", value.get("ts", 0)) or 0)
+            session_id = str(value.get("session_id", key))
+        else:
+            # Backward compatibility for v15 data: {username: timestamp}
+            username = normalize_display_name(key)
+            last_seen = int(value or 0)
+            session_id = "legacy::" + canonical_display_name(username)
+        if username and now - last_seen <= ONLINE_ACTIVE_SECONDS:
+            active[session_id] = {"username": username, "last_seen": last_seen, "session_id": session_id}
+    return active
+
+
+def username_taken_in_room(room: str, username: str) -> str | None:
+    online = load_json(ONLINE_FILE)
+    key = room_key(room)
+    current_session = get_session_id()
+    active = normalize_online_entries(online.get(key, {}))
+    wanted = canonical_display_name(username)
+    for session_id, entry in active.items():
+        existing = normalize_display_name(entry.get("username", ""))
+        if session_id != current_session and canonical_display_name(existing) == wanted:
+            return existing
+    return None
+
+
 def update_online(room: str, username: str) -> list[str]:
     online = load_json(ONLINE_FILE)
     key = room_key(room)
     now = now_epoch()
-    online.setdefault(key, {})
-    online[key][username] = now
-    active = {user: int(ts) for user, ts in online[key].items() if now - int(ts) <= ONLINE_ACTIVE_SECONDS}
+    session_id = get_session_id()
+    active = normalize_online_entries(online.get(key, {}), now)
+    active[session_id] = {"username": username, "last_seen": now, "session_id": session_id}
     online[key] = active
     atomic_write_json(ONLINE_FILE, online)
     mark_room_active(room)
-    return [user for user in active if user != username]
+    return [entry["username"] for sid, entry in active.items() if sid != session_id]
 
 
 def revoke_room_invites_by_key(key: str) -> int:
@@ -911,7 +953,7 @@ def purge_inactive_rooms() -> int:
             settings.pop(key, None)
             changed = True
             continue
-        active = {u: int(ts) for u, ts in online.get(key, {}).items() if now - int(ts) <= ONLINE_ACTIVE_SECONDS}
+        active = normalize_online_entries(online.get(key, {}), now)
         online[key] = active
         expires_at = int(config.get("expires_at", now + ROOM_DEFAULT_TTL_MINUTES * 60))
         minutes = int(config.get("auto_destroy_minutes", DEFAULT_DESTROY_MINUTES))
@@ -1651,7 +1693,7 @@ def render_public_room_creator() -> None:
 
 def render_landing() -> None:
     st.markdown('<div class="hero"><span class="badge">🔐 secure</span><span class="badge">60 menit</span><span class="badge">auto revoke</span><h1>AntiTrust</h1><p class="muted">Room terenkripsi sementara. Share link, auto revoke.</p></div>', unsafe_allow_html=True)
-    st.caption("Nama pengguna terkunci setelah ditetapkan. Jika memakai nama adioranye atau Galuh Adi Insani, wajib login admin dan akan tampil badge khusus.")
+    st.caption("Nama pengguna terkunci setelah ditetapkan. Dalam satu room, nama yang sama tidak bisa aktif bersamaan. Nama adioranye atau Galuh Adi Insani wajib login admin dan tampil badge khusus.")
     render_public_room_creator()
     with st.expander("Admin panel", expanded=False):
         render_admin_panel()
@@ -2006,6 +2048,12 @@ def main() -> None:
         st_autorefresh(interval=1000, limit=max(1, min(current_invite_left + 2, 3700)), key="active_invite_expire_tick")
     username = get_locked_username(is_admin=bool(st.session_state.get("admin_ok")))
     if not username:
+        return
+
+    taken_by = username_taken_in_room(room, username)
+    if taken_by:
+        st.error(f"Nama pengguna '{taken_by}' sedang digunakan di room ini. Gunakan nama lain untuk masuk room lain, atau tunggu sampai sesi pengguna tersebut tidak aktif.")
+        st.info("Nama yang sama tidak boleh aktif bersamaan dalam satu room chat agar identitas pengirim tidak membingungkan.")
         return
 
     if room_is_expired(room):

@@ -73,3 +73,9 @@ PY
 - Bubble pesan milik sendiri memakai gradient berdasarkan warna username.
 - Metadata chat diberi titik warna user agar percakapan lebih nyaman dibaca.
 - Warna tetap aman untuk light mode dan dark mode.
+
+## Update v16 - Unique Username Per Room
+- Nama yang sama tidak bisa aktif bersamaan dalam satu room chat.
+- Sistem mengecek username aktif sebelum user masuk ke percakapan.
+- Jika nama sudah dipakai user lain di room yang sama, chat ditahan dan muncul notifikasi untuk memakai nama lain atau menunggu sesi lama tidak aktif.
+- Format data online dibuat kompatibel dengan versi lama dan otomatis dibersihkan dari sesi yang sudah tidak aktif.
