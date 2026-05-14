@@ -1482,6 +1482,85 @@ def render_hide_link_redirect(seconds_left: int) -> None:
     )
 
 
+def render_click_to_copy_invite_link(invite_url: str, input_key: str, label: str = "Invite link") -> None:
+    """Render invite link that copies itself when clicked."""
+    safe_label = html.escape(label)
+    safe_url = html.escape(str(invite_url or ""), quote=True)
+    safe_id = "copy_invite_" + hashlib.sha1(f"{input_key}:{invite_url}:{time.time_ns()}".encode()).hexdigest()[:12]
+    components.html(
+        f"""
+        <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;width:100%;box-sizing:border-box;">
+          <div style="font-size:12px;font-weight:700;margin-bottom:6px;opacity:.84;">{safe_label}</div>
+          <div style="display:flex;gap:8px;align-items:center;width:100%;">
+            <input id="{safe_id}_input" readonly value="{safe_url}" title="Klik untuk copy link" style="
+              flex:1;
+              min-width:0;
+              cursor:pointer;
+              border-radius:16px;
+              border:1px solid rgba(120,145,180,.42);
+              background:rgba(255,255,255,.54);
+              color:inherit;
+              padding:10px 12px;
+              font-size:13px;
+              outline:none;
+              box-shadow:inset 0 1px 0 rgba(255,255,255,.65),0 8px 22px rgba(0,0,0,.08);
+            "/>
+            <button id="{safe_id}_btn" type="button" style="
+              cursor:pointer;
+              border-radius:999px;
+              border:1px solid rgba(120,145,180,.42);
+              background:rgba(255,255,255,.58);
+              color:inherit;
+              padding:10px 13px;
+              font-weight:800;
+              white-space:nowrap;
+              box-shadow:inset 0 1px 0 rgba(255,255,255,.65),0 8px 22px rgba(0,0,0,.08);
+            ">Copy</button>
+          </div>
+          <div id="{safe_id}_status" style="font-size:11px;margin-top:5px;opacity:.74;">Klik link atau tombol Copy untuk menyalin.</div>
+        </div>
+        <script>
+        (function(){{
+          const text = {json.dumps(str(invite_url or ""))};
+          const input = document.getElementById('{safe_id}_input');
+          const btn = document.getElementById('{safe_id}_btn');
+          const status = document.getElementById('{safe_id}_status');
+          function setStatus(message){{
+            if (!status) return;
+            status.textContent = message;
+            setTimeout(() => {{ status.textContent = 'Klik link atau tombol Copy untuk menyalin.'; }}, 1800);
+          }}
+          async function copyLink(){{
+            try {{
+              if (navigator.clipboard && window.isSecureContext) {{
+                await navigator.clipboard.writeText(text);
+              }} else {{
+                const temp = document.createElement('textarea');
+                temp.value = text;
+                temp.setAttribute('readonly', '');
+                temp.style.position = 'fixed';
+                temp.style.left = '-9999px';
+                document.body.appendChild(temp);
+                temp.select();
+                document.execCommand('copy');
+                document.body.removeChild(temp);
+              }}
+              if (input) input.select();
+              setStatus('Link berhasil dicopy.');
+            }} catch(e) {{
+              if (input) input.select();
+              setStatus('Gagal auto-copy. Link sudah diblok, tekan Ctrl/Cmd+C.');
+            }}
+          }}
+          if (input) input.addEventListener('click', copyLink);
+          if (btn) btn.addEventListener('click', copyLink);
+        }})();
+        </script>
+        """,
+        height=92,
+    )
+
+
 def render_temporary_invite_link(
     *,
     url_key: str,
@@ -1525,7 +1604,7 @@ def render_temporary_invite_link(
         st.rerun()
 
     room_name = st.session_state.get(room_key) if room_key else None
-    st.text_input("Invite link", value=invite_url, key=input_key)
+    render_click_to_copy_invite_link(invite_url, input_key)
     render_whatsapp_share(invite_url, room_name)
     with st.expander("QR Invite", expanded=False):
         render_qr_invite(invite_url)
@@ -1570,7 +1649,7 @@ def render_expiring_invite_link(
         st.toast("Invite link sudah habis dan disembunyikan.")
         st.rerun()
     room_name = st.session_state.get(room_key) if room_key else None
-    st.text_input("Invite link", value=invite_url, key=input_key)
+    render_click_to_copy_invite_link(invite_url, input_key)
     render_whatsapp_share(invite_url, room_name)
     with st.expander("QR Invite", expanded=False):
         render_qr_invite(invite_url)
