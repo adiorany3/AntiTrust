@@ -1622,7 +1622,7 @@ def render_public_room_creator() -> None:
 
 def render_landing() -> None:
     st.markdown('<div class="hero"><span class="badge">🔐 secure</span><span class="badge">60 menit</span><span class="badge">auto revoke</span><h1>AntiTrust</h1><p class="muted">Room terenkripsi sementara. Share link, auto revoke.</p></div>', unsafe_allow_html=True)
-    st.caption("Nama pengguna terkunci setelah ditetapkan. Jika memakai nama adioranye atau Galuh Adi Insani, wajib login admin dan akan tampil badge khusus.")
+    st.caption("Gunakanlah dengan bijak")
     render_public_room_creator()
     with st.expander("Admin panel", expanded=False):
         render_admin_panel()
