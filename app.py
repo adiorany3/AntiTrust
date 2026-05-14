@@ -2019,6 +2019,113 @@ def render_sound_notice(signature: str, enabled: bool) -> None:
     )
 
 
+
+def decode_room_name_from_config(config: dict[str, Any], fallback_key: str = "") -> str:
+    """Ambil nama room dari config terenkripsi untuk panel admin."""
+    room_cipher = str(config.get("room_cipher", "") or "")
+    if room_cipher:
+        room = clean_room_name(decrypt_text(room_cipher).strip())
+        if room and not room.startswith("["):
+            return room
+    return fallback_key[:18] + "..." if fallback_key else "room-tidak-terbaca"
+
+
+def destroy_room_by_settings_key(settings_key: str, room_name: str = "") -> tuple[int, int]:
+    """Revoke room dari panel admin, tetap aman walau nama room gagal didekripsi."""
+    room_name = clean_room_name(room_name)
+    if room_name and room_key(room_name) == settings_key:
+        return destroy_room_and_revoke(room_name)
+
+    rooms = load_json(CHAT_FILE)
+    online = load_json(ONLINE_FILE)
+    settings = load_json(ROOM_SETTINGS_FILE)
+    count = len(rooms.get(settings_key, [])) if isinstance(rooms.get(settings_key), list) else 0
+    rooms.pop(settings_key, None)
+    online.pop(settings_key, None)
+    settings.pop(settings_key, None)
+    atomic_write_json(CHAT_FILE, rooms)
+    atomic_write_json(ONLINE_FILE, online)
+    atomic_write_json(ROOM_SETTINGS_FILE, settings)
+    shutil.rmtree(PACKET_DIR / settings_key, ignore_errors=True)
+    revoked = revoke_room_invites_by_key(settings_key)
+    return count, revoked
+
+
+def get_active_room_rows() -> list[dict[str, Any]]:
+    """Daftar semua room yang masih aktif untuk halaman admin."""
+    settings = load_json(ROOM_SETTINGS_FILE)
+    rooms = load_json(CHAT_FILE)
+    online = load_json(ONLINE_FILE)
+    now = now_epoch()
+    rows: list[dict[str, Any]] = []
+
+    for key, config in settings.items():
+        if not isinstance(config, dict):
+            continue
+        expires_at = int(config.get("expires_at", 0) or 0)
+        destroyed_at = int(config.get("destroyed_at", 0) or 0)
+        if destroyed_at or expires_at <= now:
+            continue
+        room_name = decode_room_name_from_config(config, key)
+        active_entries = normalize_online_entries(online.get(key, {}), now)
+        messages = rooms.get(key, [])
+        created_by = decrypt_text(str(config.get("created_by", ""))).strip() if config.get("created_by") else "anonymous"
+        if not created_by or created_by.startswith("["):
+            created_by = "anonymous"
+        rows.append({
+            "key": key,
+            "room": room_name,
+            "created_by": created_by,
+            "messages": len(messages) if isinstance(messages, list) else 0,
+            "online": len(active_entries),
+            "seconds_left": max(0, expires_at - now),
+            "created_at": int(config.get("created_at", 0) or 0),
+        })
+
+    rows.sort(key=lambda item: (item["seconds_left"], item["room"].casefold()))
+    return rows
+
+
+def render_admin_active_rooms_panel() -> None:
+    st.divider()
+    st.subheader("Room aktif")
+    rows = get_active_room_rows()
+    if not rows:
+        st.info("Belum ada room aktif.")
+        return
+
+    st.caption(f"Total room aktif: {len(rows)}. Admin bisa revoke satu per satu atau semuanya.")
+    for row in rows:
+        room_label = row["room"]
+        with st.container(border=True):
+            col_info, col_action = st.columns([3, 1])
+            with col_info:
+                st.markdown(f"**{html.escape(room_label)}**")
+                st.caption(
+                    f"Sisa waktu {format_countdown(row['seconds_left'])} · "
+                    f"Online {row['online']} · Pesan/packet {row['messages']} · Pembuat {row['created_by']}"
+                )
+            with col_action:
+                confirm_key = f"admin_confirm_revoke::{row['key']}"
+                confirmed = st.checkbox("Konfirmasi", key=confirm_key)
+                if st.button("Revoke", type="primary", use_container_width=True, disabled=not confirmed, key=f"admin_revoke_room::{row['key']}"):
+                    count, revoked = destroy_room_by_settings_key(row["key"], room_label)
+                    st.success(f"Room {room_label} direvoke. {count} pesan/packet dihapus, {revoked} invite link direvoke.")
+                    st.rerun()
+
+    confirm_all = st.checkbox("Saya paham: semua room aktif, chat, packet, dan invite link akan direvoke/dihapus", key="admin_confirm_revoke_all_rooms")
+    if st.button("Revoke semua room aktif", type="primary", use_container_width=True, disabled=not confirm_all, key="admin_revoke_all_rooms"):
+        total_rooms = 0
+        total_messages = 0
+        total_invites = 0
+        for row in get_active_room_rows():
+            count, revoked = destroy_room_by_settings_key(row["key"], row["room"])
+            total_rooms += 1
+            total_messages += count
+            total_invites += revoked
+        st.success(f"{total_rooms} room aktif direvoke. {total_messages} pesan/packet dihapus, {total_invites} invite link direvoke.")
+        st.rerun()
+
 def render_admin_panel() -> None:
     admin_password = get_secret("CHAT_ADMIN_PASSWORD", "")
     with st.container(border=True):
@@ -2064,6 +2171,9 @@ def render_admin_panel() -> None:
         ):
             if st.session_state.get("last_room"):
                 render_countdown("Sisa waktu room", room_seconds_left(st.session_state.get("last_room")))
+
+        render_admin_active_rooms_panel()
+
         if st.button("Logout admin", use_container_width=True):
             st.session_state.pop("admin_ok", None)
             st.rerun()
