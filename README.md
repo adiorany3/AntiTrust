@@ -105,3 +105,9 @@ PY
 - Interval auto-refresh default diubah menjadi 2 detik.
 - Pilihan interval kini tersedia: 2, 5, 8, 10, 15, 30, dan 60 detik.
 - Auto-refresh tetap aktif default dan tetap difokuskan ke area pesan.
+
+## v17.6 Hotfix
+- Memperbaiki error Streamlit slider menjelang room auto revoke.
+- Panel invite sekarang otomatis ditutup saat sisa waktu room kurang dari 1 menit.
+- State slider invite lama di-reset jika sudah di luar batas sisa waktu room.
+- Jika room sudah habis, sesi dikembalikan ke halaman awal setelah revoke.

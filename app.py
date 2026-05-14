@@ -1783,18 +1783,56 @@ def render_mobile_message_focus() -> None:
 def render_room_invite_panel(room: str, username: str) -> None:
     with st.expander("Invite", expanded=False):
         room_left = room_seconds_left(room)
-        max_link_minutes = max(1, min(INVITE_MAX_TTL_MINUTES, (room_left + 59) // 60))
-        st.caption("Semua user bisa buat link. Maksimal mengikuti sisa waktu room.")
-        ttl = st.slider("Masa aktif link", min_value=1, max_value=max_link_minutes, value=min(30, max_link_minutes), key="room_invite_ttl")
-        if st.button("Create link", use_container_width=True):
-            if room_is_expired(room):
-                destroy_room_and_revoke(room)
-                st.error("Room sudah kedaluwarsa dan direvoke.")
-                st.rerun()
-            token = create_invite(room, int(ttl), username)
-            st.session_state["room_invite_url"] = build_invite_url(token)
-            st.session_state["room_invite_token"] = token
-            st.success("Invite link dibuat.")
+
+        # Saat room hampir habis/berakhir, jangan render slider.
+        # Streamlit slider akan error bila state lama lebih besar dari max_value baru
+        # atau max_value turun menjadi 0 menjelang auto revoke.
+        if room_left <= 0 or room_is_expired(room):
+            st.warning("Room sudah habis. Invite link otomatis dinonaktifkan.")
+            for key in ("room_invite_url", "room_invite_token", "room_invite_url_box", "room_invite_ttl"):
+                st.session_state.pop(key, None)
+            destroy_room_and_revoke(room)
+            st.session_state.pop("active_room", None)
+            st.session_state.pop("active_invite_token", None)
+            st.rerun()
+            return
+
+        max_link_minutes = min(INVITE_MAX_TTL_MINUTES, max(1, (room_left + 59) // 60))
+
+        # Jika sisa waktu room mengecil, state slider lama dapat berada di luar range.
+        # Reset sebelum widget dibuat agar tidak memicu StreamlitAPIException.
+        current_ttl = st.session_state.get("room_invite_ttl", min(30, max_link_minutes))
+        try:
+            current_ttl = int(current_ttl)
+        except Exception:
+            current_ttl = min(30, max_link_minutes)
+        if current_ttl < 1 or current_ttl > max_link_minutes:
+            st.session_state["room_invite_ttl"] = min(30, max_link_minutes)
+
+        if room_left < 60:
+            st.info("Sisa waktu room kurang dari 1 menit. Pembuatan invite link baru ditutup.")
+        else:
+            st.caption("Semua user bisa buat link. Maksimal mengikuti sisa waktu room.")
+            ttl = st.slider(
+                "Masa aktif link",
+                min_value=1,
+                max_value=int(max_link_minutes),
+                value=int(st.session_state.get("room_invite_ttl", min(30, max_link_minutes))),
+                key="room_invite_ttl",
+            )
+            if st.button("Create link", use_container_width=True):
+                if room_is_expired(room):
+                    destroy_room_and_revoke(room)
+                    st.error("Room sudah kedaluwarsa dan direvoke.")
+                    st.session_state.pop("active_room", None)
+                    st.session_state.pop("active_invite_token", None)
+                    st.rerun()
+                safe_ttl = max(1, min(int(ttl), int(max_link_minutes)))
+                token = create_invite(room, safe_ttl, username)
+                st.session_state["room_invite_url"] = build_invite_url(token)
+                st.session_state["room_invite_token"] = token
+                st.success("Invite link dibuat.")
+
         if st.session_state.get("room_invite_url"):
             render_expiring_invite_link(
                 url_key="room_invite_url",
