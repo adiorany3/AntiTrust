@@ -130,3 +130,10 @@ PY
 - Tab **Self-destruct** dipisahkan dari tab **Text**.
 - Pesan biasa tidak lagi memakai pilihan self-destruct, sehingga form utama lebih stabil saat auto-refresh.
 - Pesan self-destruct tetap tersedia di tab tersendiri dengan pilihan waktu hilang.
+
+## Update v18 - Online Status + Mobile Polish
+- Menampilkan status online user dalam bentuk chip horizontal yang ringkas.
+- Setiap user online memakai warna sesuai username, sama seperti warna bubble chat.
+- User sendiri diberi tanda `kamu` agar mudah dikenali.
+- Tampilan mobile dipadatkan: header lebih kecil, tab lebih pendek, tombol/input lebih ringan, dan online chip bisa digeser horizontal.
+- Tinggi chat box dioptimalkan agar pesan lebih nyaman dibaca di browser HP.

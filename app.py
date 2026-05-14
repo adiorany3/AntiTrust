@@ -281,6 +281,92 @@ a{color:var(--primary)!important;text-decoration:none!important;}
   -webkit-backdrop-filter:blur(22px) saturate(180%);
 }
 hr{border-color:var(--line)!important;}
+
+
+/* v18 mobile + online status polish */
+.room-status-line{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  flex-wrap:wrap;
+  margin:4px 0 2px;
+}
+.online-strip{
+  display:flex;
+  gap:6px;
+  overflow-x:auto;
+  padding:5px 0 2px;
+  margin:2px 0 4px;
+  scrollbar-width:none;
+  -webkit-overflow-scrolling:touch;
+}
+.online-strip::-webkit-scrollbar{display:none;}
+.online-chip{
+  flex:0 0 auto;
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  max-width:210px;
+  padding:5px 9px;
+  border-radius:999px;
+  border:1px solid hsl(var(--user-hue,215) 76% 52% / .28);
+  background:linear-gradient(135deg,
+    hsl(var(--user-hue,215) 86% 96% / .72),
+    hsl(calc(var(--user-hue,215) + 28) 84% 96% / .52)
+  );
+  color:var(--text-strong)!important;
+  font-size:.76rem;
+  font-weight:800;
+  white-space:nowrap;
+  box-shadow:var(--inner),0 8px 22px hsl(var(--user-hue,215) 62% 35% / .10);
+  backdrop-filter:blur(16px) saturate(170%);
+  -webkit-backdrop-filter:blur(16px) saturate(170%);
+}
+.online-dot{
+  width:8px;
+  height:8px;
+  flex:0 0 auto;
+  border-radius:999px;
+  background:hsl(var(--user-hue,215) 82% 54%);
+  box-shadow:0 0 0 3px hsl(var(--user-hue,215) 82% 54% / .18);
+}
+.online-me{
+  border-color:rgba(24,119,242,.44);
+  box-shadow:var(--inner),0 10px 24px rgba(24,119,242,.14);
+}
+.online-label{
+  color:var(--muted)!important;
+  font-size:.76rem;
+  font-weight:800;
+}
+@media (prefers-color-scheme: dark){
+  .online-chip{
+    background:linear-gradient(135deg,
+      hsl(var(--user-hue,215) 52% 22% / .72),
+      hsl(calc(var(--user-hue,215) + 28) 48% 18% / .58)
+    );
+    border-color:hsl(var(--user-hue,215) 70% 62% / .32);
+    color:var(--text-strong)!important;
+  }
+}
+@media (max-width:760px){
+  .block-container{max-width:100%!important;padding:.28rem .38rem .55rem!important;}
+  .hero{padding:7px 9px!important;border-radius:16px!important;margin-bottom:3px!important;}
+  .hero h1{font-size:1.02rem!important;}
+  .hero .badge:nth-of-type(n+2){display:none!important;}
+  .badge{font-size:.61rem!important;padding:2px 6px!important;}
+  .card,.danger-box{border-radius:15px!important;padding:7px 8px!important;}
+  .muted{font-size:.74rem!important;}
+  .room-status-line{gap:4px;margin:2px 0;}
+  .online-strip{margin:1px 0 2px;padding:4px 0 1px;}
+  .online-chip{font-size:.70rem;padding:4px 7px;max-width:170px;}
+  [data-testid="stExpander"] summary{padding:.34rem .55rem!important;font-size:.82rem!important;}
+  .stTabs [data-baseweb="tab"]{height:31px!important;padding:.15rem .48rem!important;font-size:.78rem!important;}
+  .stButton button,.stFormSubmitButton button,.stDownloadButton button{min-height:32px!important;padding:.22rem .55rem!important;font-size:.80rem!important;}
+  .stTextInput input,.stTextArea textarea,.stNumberInput input{min-height:32px!important;font-size:16px!important;}
+  [data-testid="column"]{padding-left:.15rem!important;padding-right:.15rem!important;}
+}
+
 /* v13 compact layout: reduce vertical scroll */
 .block-container{max-width:780px!important;padding:.45rem .65rem .8rem!important;}
 [data-testid="stVerticalBlock"]{gap:.32rem!important;}
@@ -396,6 +482,15 @@ html,body{margin:0;background:transparent;font-family:Inter,system-ui,-apple-sys
 .reactions{margin-top:6px;font-size:12px;opacity:.92;}
 .expire{font-size:10px;opacity:.75;margin-top:3px;}
 .pinned-card{border:1px solid var(--line);border-radius:16px;padding:8px 10px;margin:0 0 9px 0;background:rgba(250,204,21,.16);color:var(--bubble-text);}
+
+@media (max-width:760px){
+  .chat{height:360px;max-height:56vh;border-radius:18px;padding:8px;}
+  .row{margin-bottom:7px;}
+  .bubble{max-width:86%;padding:8px 9px;border-radius:16px;font-size:14px;line-height:1.36;}
+  .meta{font-size:9px;gap:3px;}
+  .thumb{max-height:130px;}
+}
+
 </style>
 """
 
@@ -926,6 +1021,29 @@ def update_online(room: str, username: str) -> list[str]:
     atomic_write_json(ONLINE_FILE, online)
     mark_room_active(room)
     return [entry["username"] for sid, entry in active.items() if sid != session_id]
+
+
+def get_room_online_entries(room: str) -> list[dict[str, Any]]:
+    """Return active online sessions for a room, including current user."""
+    online = load_json(ONLINE_FILE)
+    key = room_key(room)
+    now = now_epoch()
+    active = normalize_online_entries(online.get(key, {}), now)
+    current_session = get_session_id()
+    entries: list[dict[str, Any]] = []
+    for sid, entry in active.items():
+        name = normalize_display_name(entry.get("username", ""))
+        if not name:
+            continue
+        last_seen = int(entry.get("last_seen", now) or now)
+        entries.append({
+            "username": name,
+            "session_id": sid,
+            "is_me": sid == current_session,
+            "seconds_ago": max(0, now - last_seen),
+        })
+    entries.sort(key=lambda item: (not bool(item.get("is_me")), canonical_display_name(str(item.get("username", "")))))
+    return entries
 
 
 def revoke_room_invites_by_key(key: str) -> int:
@@ -1780,7 +1898,7 @@ def render_mobile_message_focus() -> None:
             const isMobile = parentWindow.innerWidth <= 760;
             if (!isMobile) return;
             setTimeout(function(){
-              anchor.scrollIntoView({block: 'start', inline: 'nearest', behavior: 'auto'});
+              anchor.scrollIntoView({block: 'center', inline: 'nearest', behavior: 'auto'});
             }, 120);
           } catch (e) {}
         })();
@@ -2194,6 +2312,34 @@ def render_packet_viewer(room: str, messages: list[dict[str, Any]]) -> None:
         key=f"download_packet::{room}::{selected}",
     )
 
+def render_online_users(entries: list[dict[str, Any]], current_username: str) -> None:
+    """Render compact horizontal online-user chips for desktop and mobile."""
+    if not entries:
+        st.markdown('<div class="online-label">Tidak ada user online.</div>', unsafe_allow_html=True)
+        return
+    chips = []
+    seen: set[str] = set()
+    for entry in entries[:24]:
+        name = normalize_display_name(entry.get("username", ""))
+        if not name:
+            continue
+        ident = str(entry.get("session_id", "")) or canonical_display_name(name)
+        if ident in seen:
+            continue
+        seen.add(ident)
+        hue = user_hue(name)
+        is_me = bool(entry.get("is_me")) or canonical_display_name(name) == canonical_display_name(current_username)
+        cls = "online-chip online-me" if is_me else "online-chip"
+        me = " · kamu" if is_me else ""
+        safe_name = username_with_badge_html(name)
+        chips.append(
+            f'<span class="{cls}" style="--user-hue:{hue}">'
+            f'<span class="online-dot"></span><span>{safe_name}{html.escape(me)}</span></span>'
+        )
+    label = f'<span class="online-label">Online {len(chips)}</span>'
+    st.markdown(f'<div class="online-strip">{label}{"".join(chips)}</div>', unsafe_allow_html=True)
+
+
 def render_compact_room_panel(room: str, username: str, messages: list[dict[str, Any]]) -> None:
     with st.expander("Panel room", expanded=False):
         tab_invite, tab_features, tab_files, tab_security = st.tabs(["Invite", "Fitur", "File", "Aksi"])
@@ -2293,16 +2439,22 @@ def main() -> None:
         st.error("Room sudah kedaluwarsa dan otomatis direvoke.")
         st.rerun()
     active_users = update_online(room, username)
+    online_entries = get_room_online_entries(room)
     messages = load_messages(room)
     config = get_room_config(room)
     status = room_status_label(room, len(active_users))
-    st.markdown(f'<span class="muted">{username_with_badge_html(username)} · status: {html.escape(status)} · {len(active_users)} aktif · sisa {format_countdown(room_seconds_left(room))} · kosong: {choice_from_minutes(config.get("auto_destroy_minutes"))}</span>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="room-status-line"><span class="muted">{username_with_badge_html(username)} · {html.escape(status)} · '
+        f'sisa {format_countdown(room_seconds_left(room))} · kosong: {choice_from_minutes(config.get("auto_destroy_minutes"))}</span></div>',
+        unsafe_allow_html=True,
+    )
+    render_online_users(online_entries, username)
     render_sound_notice(latest_foreign_signature(messages, username), sound)
     render_pinned_message(room, messages)
     render_compact_room_panel(room, username, messages)
     render_messages = prepare_messages_for_render(room, messages)
     render_message_focus_marker()
-    components.html(render_chat(render_messages, username), height=333, scrolling=False)
+    components.html(render_chat(render_messages, username), height=392, scrolling=False)
     render_mobile_message_focus()
     render_message_form(room, username)
     if auto_refresh and st_autorefresh is not None:
