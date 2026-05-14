@@ -1,16 +1,15 @@
+from __future__ import annotations
+
 import base64
 import hashlib
 import hmac
 import html
 import io
 import json
-import math
 import os
+import secrets
 import shutil
-import struct
 import time
-import uuid
-import wave
 import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -19,314 +18,98 @@ from urllib.parse import urlencode
 
 import streamlit as st
 import streamlit.components.v1 as components
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 
 try:
     from PIL import Image
-    Image.MAX_IMAGE_PIXELS = 24_000_000
-except Exception:
+    Image.MAX_IMAGE_PIXELS = 16_000_000
+except Exception:  # pragma: no cover
     Image = None
 
 try:
     from streamlit_autorefresh import st_autorefresh
-except Exception:
+except Exception:  # pragma: no cover
     st_autorefresh = None
 
-# ==============================
-# CONFIG
-# ==============================
-APP_TITLE = "AntiTrust Terminal"
-APP_ICON = "🟢"
-PUBLIC_APP_URL = "https://antitrust.streamlit.app"
-
-FERNET_KEY_FILE = "fernet.key"
-CHAT_FILE = "chat_rooms.json"
-ONLINE_FILE = "online_status.json"
-ROOM_SETTINGS_FILE = "room_settings.json"
-PRIVATE_LINKS_FILE = "private_links.json"
-PACKET_DIR = "secure_packets"
-SKULL_IMAGE_FILE = "assets/skull.svg"
-
+APP_TITLE = "AntiTrust"
+APP_ICON = "🔐"
 WIB = timezone(timedelta(hours=7))
-ONLINE_ACTIVE_SECONDS = 20
-DEFAULT_AUTO_DESTROY_MINUTES = 30
-AUTO_DESTROY_CHOICES = ["Never", "10 menit", "20 menit", "30 menit", "40 menit", "50 menit", "60 menit"]
-MAX_MEDIA_BYTES = 25 * 1024 * 1024
-THUMBNAIL_MAX_SIZE = (220, 220)
+DATA_DIR = Path(os.getenv("ANTITRUST_DATA_DIR", ".antitrust_data"))
+PACKET_DIR = DATA_DIR / "packets"
+CHAT_FILE = DATA_DIR / "chat_rooms.json"
+ONLINE_FILE = DATA_DIR / "online_status.json"
+ROOM_SETTINGS_FILE = DATA_DIR / "room_settings.json"
+INVITE_FILE = DATA_DIR / "private_links.json"
+LOCAL_KEY_FILE = DATA_DIR / "fernet.key"
 
-ALLOWED_IMAGE_TYPES = ["png", "jpg", "jpeg", "webp"]
-ALLOWED_AUDIO_TYPES = ["wav", "mp3", "ogg", "m4a", "aac", "flac", "webm"]
-ALLOWED_DOCUMENT_TYPES = ["pdf", "docx", "xlsx", "pptx"]
-DOCUMENT_MIME_BY_EXT = {
+MAX_TEXT_LENGTH = 2000
+MAX_MEDIA_BYTES = 10 * 1024 * 1024
+ONLINE_ACTIVE_SECONDS = 25
+DEFAULT_DESTROY_MINUTES = 30
+AUTO_DESTROY_CHOICES = ["Never", "10 menit", "20 menit", "30 menit", "60 menit"]
+MESSAGE_RATE_LIMIT_SECONDS = 1.5
+INVITE_DEFAULT_TTL_HOURS = 24
+
+ALLOWED_IMAGE_TYPES = {"png", "jpg", "jpeg", "webp"}
+ALLOWED_AUDIO_TYPES = {"wav", "mp3", "ogg", "m4a", "aac", "flac", "webm"}
+ALLOWED_DOCUMENT_TYPES = {"pdf", "docx", "xlsx", "pptx"}
+DOCUMENT_MIME = {
     "pdf": "application/pdf",
     "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 }
-
+RISKY_EXTENSIONS = {
+    "sh", "bash", "zsh", "ps1", "bat", "cmd", "exe", "dll", "scr", "vbs", "js", "jar", "com", "msi"
+}
 SHELL_SIGNATURES = [
-    b"#!/bin/sh",
-    b"#!/bin/bash",
-    b"#!/usr/bin/env sh",
-    b"#!/usr/bin/env bash",
-    b"#!/usr/bin/env zsh",
-    b"powershell",
-    b"@echo off",
+    b"#!/bin/sh", b"#!/bin/bash", b"#!/usr/bin/env sh", b"#!/usr/bin/env bash"
 ]
-SHELL_KEYWORDS = [
-    b"rm -rf",
-    b"chmod +x",
-    b"curl ",
-    b"wget ",
-    b"nc ",
-    b"netcat",
-    b"bash -i",
-    b"/bin/bash",
-    b"/bin/sh",
-    b"subprocess",
-    b"eval(",
-    b"exec(",
-]
+SHELL_KEYWORDS = [b"curl ", b"wget ", b"chmod ", b"rm -rf", b"powershell", b"Invoke-WebRequest"]
 
 CSS = """
-@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
-:root {
-  --green: #00ff66;
-  --green-soft: #8cffae;
-  --line: rgba(0,255,102,.55);
-  --danger: #ff335c;
-  --cyan: #00ddff;
-  --panel: #020b04;
-  --panel2: #001604;
+<style>
+:root{
+  --bg:#f7f8fb;--card:#ffffff;--text:#172033;--muted:#697386;--line:#e6e9f0;
+  --primary:#2563eb;--primary-soft:#eff6ff;--danger:#dc2626;--ok:#16a34a;
 }
-#MainMenu, footer, header { visibility: hidden; }
-.stApp {
-  background: #000;
-  color: var(--green);
-  font-family: 'Share Tech Mono', monospace;
-}
-.stApp::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  background: repeating-linear-gradient(to bottom, rgba(0,255,102,.035) 0, rgba(0,255,102,.035) 1px, transparent 2px, transparent 5px);
-  opacity: .42;
-  z-index: 9999;
-}
-.stApp::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  box-shadow: inset 0 0 90px rgba(0,255,102,.13);
-  z-index: 9998;
-}
-.block-container { max-width: 900px; padding: 1.2rem 1rem 2rem 1rem; }
-h1, h2, h3, p, label, span, div, button, input, textarea {
-  font-family: 'Share Tech Mono', monospace !important;
-}
-h1, h2, h3 {
-  color: var(--green) !important;
-  text-shadow: 0 0 8px rgba(0,255,102,.55);
-  letter-spacing: 1px;
-}
-h1 { font-size: 1.55rem !important; border-bottom: 1px solid var(--line); padding-bottom: .45rem; }
-h1::before { content: "root@antitrust:~$ "; color: var(--green-soft); }
-.terminal-bar, .compact-panel {
-  border: 1px solid var(--line);
-  background: var(--panel);
-  padding: 10px 12px;
-  margin: 8px 0 14px 0;
-  box-shadow: 0 0 18px rgba(0,255,102,.14);
-}
-.terminal-line { margin: 0; color: var(--green-soft); font-size: .9rem; }
-.terminal-line::before { content: "> "; color: var(--green); }
-.stTextInput input, .stSelectbox div[data-baseweb="select"] > div, .stTextArea textarea, .stNumberInput input {
-  background: #000 !important;
-  color: var(--green) !important;
-  border: 1px solid var(--line) !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
-}
-.stTextInput input::placeholder, .stTextArea textarea::placeholder { color: rgba(140,255,174,.5) !important; }
-.stFileUploader, .stAudioInput {
-  background: var(--panel);
-  border: 1px dashed var(--line);
-  border-radius: 0;
-  padding: 8px;
-}
-.stButton button, .stFormSubmitButton button, .stDownloadButton button {
-  background: #000 !important;
-  color: var(--green) !important;
-  border: 1px solid var(--green) !important;
-  border-radius: 0 !important;
-  text-transform: uppercase;
-  letter-spacing: .8px;
-  box-shadow: none !important;
-}
-.stButton button:hover, .stFormSubmitButton button:hover, .stDownloadButton button:hover {
-  background: var(--green) !important;
-  color: #000 !important;
-}
-button[kind="primary"] {
-  border-color: var(--danger) !important;
-  color: var(--danger) !important;
-}
-button[kind="primary"]:hover { background: var(--danger) !important; color: #000 !important; }
-.stAlert {
-  background: var(--panel) !important;
-  color: var(--green-soft) !important;
-  border: 1px solid var(--line) !important;
-  border-radius: 0 !important;
-}
-[data-testid="stSidebar"] { background: #000; border-right: 1px solid var(--line); }
-[data-testid="stSidebar"] * { color: var(--green-soft) !important; }
-hr { border: none; border-top: 1px dashed var(--line); margin: .9rem 0; }
-.panic-panel { border: 1px solid var(--danger); background: rgba(255, 51, 92, .06); padding: 10px 12px; margin: 10px 0; }
-.panic-title { color: var(--danger); letter-spacing: 1px; }
-.panic-copy { color: #ff9db1; margin: 2px 0 0 0; font-size: .88rem; }
-.cursor-blink { display: inline-block; width: 9px; height: 17px; background: var(--green); margin-left: 4px; animation: blink .85s infinite; }
-.skull-lock-frame {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: min(420px, 86vw);
-  min-height: 310px;
-  background: #000;
-  border: 1px solid var(--line);
-  padding: 22px 12px;
-  margin: 18px auto 0 auto;
-  overflow: hidden;
-  box-shadow: 0 0 20px rgba(0,255,102,.16), inset 0 0 32px rgba(0,255,102,.08);
-  animation: skull-frame-pulse 2.8s infinite steps(2, end);
-}
-.skull-lock-frame::before {
-  content: "";
-  position: absolute;
-  inset: -35% 0;
-  background: repeating-linear-gradient(
-    0deg,
-    rgba(0,255,102,0),
-    rgba(0,255,102,0) 8px,
-    rgba(0,255,102,.16) 9px,
-    rgba(0,255,102,0) 11px
-  );
-  transform: translateY(-40%);
-  animation: hacker-scan 2.2s linear infinite;
-  pointer-events: none;
-  z-index: 2;
-}
-.skull-lock-frame::after {
-  content: "ACCESS DENIED";
-  position: absolute;
-  left: 50%;
-  bottom: 12px;
-  transform: translateX(-50%);
-  color: rgba(0,255,102,.52);
-  font-size: .82rem;
-  letter-spacing: 3px;
-  text-shadow: 0 0 10px rgba(0,255,102,.7);
-  animation: hacker-text-flicker 1.6s infinite steps(2, end);
-  z-index: 3;
-}
-.skull-lock-img {
-  position: relative;
-  z-index: 1;
-  display: block;
-  width: min(320px, 78vw);
-  max-width: 100%;
-  height: auto;
-  filter: drop-shadow(0 0 10px rgba(0,255,102,.72));
-  animation: skull-hacker-glitch 1.85s infinite steps(2, end), skull-float 4.2s ease-in-out infinite;
-}
-.ascii-lock-note { color: rgba(140,255,174,.72); text-align: center; margin-top: 8px; font-size: .9rem; }
-.admin-center-title { text-align: center; margin-top: 14px; }
-.admin-center-title h3 { color: var(--green); margin-bottom: 2px; letter-spacing: 1px; }
-.admin-center-note { text-align: center; color: rgba(140,255,174,.72); font-size: .9rem; margin-bottom: 12px; }
-@keyframes blink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
-@keyframes skull-float {
-  0%, 100% { transform: translateY(0) scale(1); }
-  50% { transform: translateY(-8px) scale(1.025); }
-}
-@keyframes skull-hacker-glitch {
-  0%, 88%, 100% { filter: drop-shadow(0 0 10px rgba(0,255,102,.72)); opacity: 1; }
-  90% { filter: drop-shadow(-7px 0 0 rgba(0,255,102,.55)) drop-shadow(7px 0 0 rgba(255,51,92,.42)); opacity: .82; }
-  94% { filter: drop-shadow(5px 0 0 rgba(0,255,102,.62)) drop-shadow(-5px 0 0 rgba(255,51,92,.34)); opacity: 1; }
-}
-@keyframes hacker-scan {
-  0% { transform: translateY(-42%); opacity: .15; }
-  50% { opacity: .42; }
-  100% { transform: translateY(42%); opacity: .15; }
-}
-@keyframes skull-frame-pulse {
-  0%, 100% { box-shadow: 0 0 20px rgba(0,255,102,.16), inset 0 0 32px rgba(0,255,102,.08); }
-  50% { box-shadow: 0 0 34px rgba(0,255,102,.26), inset 0 0 42px rgba(0,255,102,.12); }
-}
-@keyframes hacker-text-flicker {
-  0%, 100% { opacity: .35; }
-  35% { opacity: .9; }
-  62% { opacity: .12; }
-}
-::-webkit-scrollbar { width: 8px; }
-::-webkit-scrollbar-track { background: #000; }
-::-webkit-scrollbar-thumb { background: var(--green); }
+#MainMenu, header, footer {visibility:hidden;}
+.stApp{background:linear-gradient(180deg,#f7f8fb 0%,#eef3ff 100%);color:var(--text);}
+.block-container{max-width:920px;padding:1.4rem 1rem 2.4rem;}
+h1,h2,h3{color:var(--text)!important;letter-spacing:-.02em;}
+h1{font-size:2rem!important;margin-bottom:.15rem!important;}
+[data-testid="stSidebar"]{background:#fff;border-right:1px solid var(--line);}
+.stButton button,.stFormSubmitButton button{border-radius:14px!important;border:1px solid var(--line)!important;box-shadow:0 4px 14px rgba(23,32,51,.06)!important;}
+.stButton button[kind="primary"]{background:var(--danger)!important;color:#fff!important;border-color:var(--danger)!important;}
+.stTextInput input,.stTextArea textarea,.stSelectbox div[data-baseweb="select"]>div{border-radius:14px!important;border:1px solid var(--line)!important;background:#fff!important;}
+.card{background:rgba(255,255,255,.92);border:1px solid var(--line);border-radius:24px;padding:18px 20px;box-shadow:0 10px 30px rgba(23,32,51,.07);margin:14px 0;}
+.hero{background:linear-gradient(135deg,#ffffff 0%,#eef6ff 100%);border:1px solid var(--line);border-radius:28px;padding:24px;box-shadow:0 16px 40px rgba(37,99,235,.10);margin-bottom:18px;}
+.badge{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;background:var(--primary-soft);color:var(--primary);font-size:.82rem;font-weight:700;margin-right:8px;}
+.muted{color:var(--muted);font-size:.94rem;line-height:1.55;}
+.danger-box{background:#fff1f2;border:1px solid #fecdd3;border-radius:20px;padding:14px 16px;margin:12px 0;}
+</style>
 """
 
-CHAT_COMPONENT_CSS = """
-@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
-html, body { margin: 0; padding: 0; background: transparent; font-family: 'Share Tech Mono', monospace; }
-.chat-box {
-  height: 455px;
-  overflow-y: auto;
-  box-sizing: border-box;
-  background: #000;
-  border: 1px solid #00ff66;
-  padding: 12px;
-  box-shadow: inset 0 0 18px rgba(0,255,102,.12);
-}
-.chat-line { margin: 0 0 11px 0; }
-.chat-bubble {
-  border-left: 2px solid #00ff66;
-  padding: 7px 9px;
-  color: #00ff66;
-  background: rgba(0,255,102,.045);
-  overflow-wrap: anywhere;
-}
-.chat-bubble::before { content: "> "; color: #8cffae; }
-.chat-bubble.me { border-left-color: #00ddff; color: #8ff3ff; background: rgba(0,221,255,.045); }
-.chat-bubble.me::before { content: "$ "; color: #8ff3ff; }
-.chat-meta { font-size: 11px; color: rgba(140,255,174,.65); margin-top: 4px; }
-.media-label { display: block; color: rgba(140,255,174,.88); font-size: 11px; margin: 0 0 7px 0; letter-spacing: .6px; }
-.media-note, .media-placeholder { display: block; color: rgba(140,255,174,.72); font-size: 11px; margin-top: 6px; }
-.chat-image { display: block; max-width: min(260px, 100%); max-height: 220px; object-fit: contain; border: 1px solid rgba(0,255,102,.6); background: #000; }
-.chat-doc { display: inline-block; border: 1px solid rgba(0,255,102,.7); padding: 7px 10px; color: #00ff66; text-decoration: none; background: rgba(0,255,102,.055); max-width: 100%; overflow-wrap: anywhere; }
-.empty-line { color: rgba(140,255,174,.75); margin-top: 10px; }
-::-webkit-scrollbar { width: 8px; }
-::-webkit-scrollbar-track { background: #000; }
-::-webkit-scrollbar-thumb { background: #00ff66; }
+CHAT_CSS = """
+<style>
+html,body{margin:0;background:transparent;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;color:#172033;}
+.chat{height:470px;overflow-y:auto;padding:14px;background:rgba(255,255,255,.86);border:1px solid #e6e9f0;border-radius:24px;box-sizing:border-box;}
+.row{display:flex;margin:0 0 10px 0;}
+.row.me{justify-content:flex-end;}
+.bubble{max-width:76%;padding:11px 13px;border-radius:18px;background:#f2f5fb;border:1px solid #e6e9f0;overflow-wrap:anywhere;line-height:1.42;}
+.row.me .bubble{background:#2563eb;color:#fff;border-color:#2563eb;}
+.meta{font-size:11px;color:#697386;margin-top:6px;}
+.row.me .meta{color:rgba(255,255,255,.72);}
+.empty{height:100%;display:flex;align-items:center;justify-content:center;color:#697386;}
+.packet{display:block;font-weight:700;margin-bottom:4px;}
+.thumb{max-width:min(260px,100%);max-height:190px;border-radius:14px;border:1px solid rgba(255,255,255,.35);object-fit:contain;display:block;margin-top:8px;background:#fff;}
+</style>
 """
 
 
-
-# ==============================
-# STORAGE + CRYPTO HELPERS
-# ==============================
-def load_json(path: str) -> dict[str, Any]:
-    if not os.path.exists(path):
-        return {}
-    try:
-        with open(path, "r", encoding="utf-8") as file:
-            data = json.load(file)
-        return data if isinstance(data, dict) else {}
-    except (json.JSONDecodeError, OSError):
-        return {}
-
-
-def save_json(path: str, data: dict[str, Any]) -> None:
-    with open(path, "w", encoding="utf-8") as file:
-        json.dump(data, file, indent=2, ensure_ascii=False)
+def ensure_dirs() -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    PACKET_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def get_secret(name: str, default: str = "") -> str:
@@ -339,674 +122,130 @@ def get_secret(name: str, default: str = "") -> str:
     return os.getenv(name, default)
 
 
-def get_fernet() -> Fernet:
-    if not os.path.exists(FERNET_KEY_FILE):
-        key = Fernet.generate_key()
-        with open(FERNET_KEY_FILE, "wb") as file:
-            file.write(key)
-    else:
-        with open(FERNET_KEY_FILE, "rb") as file:
-            key = file.read().strip()
-    return Fernet(key)
+def atomic_write_json(path: Path, data: dict[str, Any]) -> None:
+    ensure_dirs()
+    tmp = path.with_suffix(path.suffix + f".{secrets.token_hex(6)}.tmp")
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, path)
 
 
-def encrypt_message(text: str) -> str:
-    return get_fernet().encrypt(text.encode("utf-8", errors="ignore")).decode("ascii")
-
-
-def decrypt_message(text: str) -> str:
+def load_json(path: Path) -> dict[str, Any]:
+    ensure_dirs()
+    if not path.exists():
+        return {}
     try:
-        return get_fernet().decrypt(text.encode("ascii")).decode("utf-8", errors="replace")
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
     except Exception:
-        return "[Pesan tidak dapat didekripsi]"
+        backup = path.with_suffix(path.suffix + f".broken-{int(time.time())}")
+        try:
+            shutil.copy2(path, backup)
+        except Exception:
+            pass
+        return {}
+
+
+def get_fernet_key() -> bytes:
+    secret_key = get_secret("FERNET_KEY", "").strip()
+    if secret_key:
+        return secret_key.encode("utf-8")
+    ensure_dirs()
+    if not LOCAL_KEY_FILE.exists():
+        LOCAL_KEY_FILE.write_bytes(Fernet.generate_key())
+    return LOCAL_KEY_FILE.read_bytes().strip()
+
+
+@st.cache_resource(show_spinner=False)
+def get_fernet() -> Fernet:
+    return Fernet(get_fernet_key())
+
+
+def encrypt_text(text: str) -> str:
+    return get_fernet().encrypt(text.encode("utf-8")).decode("utf-8")
+
+
+def decrypt_text(token: str) -> str:
+    try:
+        return get_fernet().decrypt(token.encode("utf-8")).decode("utf-8")
+    except Exception:
+        return "[pesan tidak dapat didekripsi]"
 
 
 def encrypt_bytes(data: bytes) -> bytes:
     return get_fernet().encrypt(data)
 
 
-def decrypt_bytes(token: bytes) -> bytes:
-    return get_fernet().decrypt(token)
+def decrypt_bytes(data: bytes) -> bytes | None:
+    try:
+        return get_fernet().decrypt(data)
+    except InvalidToken:
+        return None
 
 
-def safe_room_slug(room: str) -> str:
-    return hashlib.sha256(room.encode("utf-8", errors="ignore")).hexdigest()[:32]
+def now_epoch() -> int:
+    return int(time.time())
+
+
+def now_wib_label() -> str:
+    return datetime.now(WIB).strftime("%d %b %Y, %H:%M")
+
+
+def slug(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8", errors="ignore")).hexdigest()[:32]
+
+
+def hmac_digest(value: str) -> str:
+    admin_secret = get_secret("CHAT_ADMIN_PASSWORD", "change-this-password")
+    return hmac.new(admin_secret.encode("utf-8"), value.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def room_key(room: str) -> str:
+    return "room_" + hmac_digest(room)[:40]
 
 
 def packet_room_dir(room: str) -> Path:
-    return Path(PACKET_DIR) / safe_room_slug(room)
+    return PACKET_DIR / room_key(room)
 
 
-def save_encrypted_packet(room: str, message_id: str, data: bytes) -> str:
-    directory = packet_room_dir(room)
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / f"{message_id}.bin"
-    path.write_bytes(encrypt_bytes(data))
-    return str(path.as_posix())
+def safe_filename(filename: str) -> str:
+    raw = Path(filename or "packet.bin").name
+    cleaned = "".join(ch for ch in raw if ch.isalnum() or ch in "._- ()")[:120]
+    return cleaned or "packet.bin"
 
 
-def resolve_packet_path(packet_path: str) -> Path | None:
-    if not packet_path:
-        return None
-    root = Path(PACKET_DIR).resolve()
-    candidate = Path(packet_path)
-    if candidate.is_absolute():
-        return None
-    target = candidate.resolve()
-    try:
-        target.relative_to(root)
-    except ValueError:
-        return None
-    return target
-
-
-def read_encrypted_packet(packet_path: str) -> bytes | None:
-    path = resolve_packet_path(packet_path)
-    if path is None or not path.exists() or not path.is_file():
-        return None
-    try:
-        return decrypt_bytes(path.read_bytes())
-    except Exception:
-        return None
-
-
-def delete_room_packet_files(room: str) -> None:
-    directory = packet_room_dir(room)
-    if directory.exists():
-        shutil.rmtree(directory, ignore_errors=True)
+def ext_of(filename: str) -> str:
+    return Path(filename).suffix.lower().lstrip(".")
 
 
 def format_bytes(size: int | str | None) -> str:
     try:
-        value = int(size or 0)
-    except (TypeError, ValueError):
-        value = 0
-    units = ["B", "KB", "MB", "GB"]
-    amount = float(value)
-    for unit in units:
-        if amount < 1024 or unit == units[-1]:
-            if unit == "B":
-                return f"{int(amount)} {unit}"
-            return f"{amount:.1f} {unit}"
+        amount = float(size or 0)
+    except Exception:
+        amount = 0
+    for unit in ["B", "KB", "MB", "GB"]:
+        if amount < 1024 or unit == "GB":
+            return f"{amount:.1f} {unit}" if unit != "B" else f"{int(amount)} {unit}"
         amount /= 1024
-    return f"{value} B"
+    return f"{amount:.1f} GB"
 
 
-def wib_now() -> str:
-    return datetime.now(WIB).strftime("%H:%M")
-
-
-def epoch_now() -> int:
-    return int(time.time())
-
-# ==============================
-# QUERY + ADMIN PANEL + SHARE LINK
-# ==============================
-def get_query_param(name: str) -> str:
-    try:
-        value = st.query_params.get(name, "")
-    except Exception:
-        try:
-            params = st.experimental_get_query_params()
-            value = params.get(name, [""])
-        except Exception:
-            value = ""
-    if isinstance(value, list):
-        return str(value[0]) if value else ""
-    return str(value or "")
-
-
-def token_hash(token: str) -> str:
-    return hashlib.sha256(token.encode("utf-8", errors="ignore")).hexdigest()
-
-
-def valid_invite_token(token: str) -> bool:
-    if not token or len(token) > 180:
+def is_text_like(data: bytes) -> bool:
+    sample = data[:4096]
+    if not sample:
         return False
-    allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
-    return all(char in allowed for char in token)
+    printable = sum(1 for byte in sample if byte in b"\t\n\r" or 32 <= byte <= 126)
+    return printable / len(sample) > 0.86
 
 
-def secrets_token() -> str:
-    import secrets
-    return secrets.token_urlsafe(32)
-
-
-def create_room_share_token(room: str) -> str:
-    token = secrets_token()
-    links = load_json(PRIVATE_LINKS_FILE)
-    links[token_hash(token)] = {
-        "room": encrypt_message(room),
-        "created_at": str(epoch_now()),
-        "active": True,
-    }
-    save_json(PRIVATE_LINKS_FILE, links)
-    return token
-
-
-def resolve_room_from_token(token: str) -> str | None:
-    if not valid_invite_token(token):
-        return None
-    links = load_json(PRIVATE_LINKS_FILE)
-    link_data = links.get(token_hash(token))
-    if not isinstance(link_data, dict):
-        return None
-    if not link_data.get("active", True):
-        return None
-    encrypted_room = str(link_data.get("room", ""))
-    room = decrypt_message(encrypted_room)
-    if not room or room.startswith("[Pesan tidak dapat didekripsi]"):
-        return None
-    return room
-
-
-def build_share_url(token: str, public_url: str = "") -> str:
-    base_url = (public_url or get_secret("PUBLIC_APP_URL", PUBLIC_APP_URL)).strip().rstrip("/")
-    return f"{base_url}/?{urlencode({'invite': token})}"
-
-
-@st.cache_data(show_spinner=False)
-def make_qr_png(link: str) -> bytes:
-    import qrcode
-
-    qr = qrcode.QRCode(
-        version=None,
-        error_correction=qrcode.constants.ERROR_CORRECT_M,
-        box_size=8,
-        border=3,
-    )
-    qr.add_data(link)
-    qr.make(fit=True)
-    image = qr.make_image(fill_color="black", back_color="white")
-    buffer = io.BytesIO()
-    image.save(buffer, format="PNG")
-    return buffer.getvalue()
-
-
-def revoke_links_for_room(room: str) -> int:
-    links = load_json(PRIVATE_LINKS_FILE)
-    revoked = 0
-    for link_data in links.values():
-        if not isinstance(link_data, dict):
-            continue
-        linked_room = decrypt_message(str(link_data.get("room", "")))
-        if linked_room == room and link_data.get("active", True):
-            link_data["active"] = False
-            link_data["revoked_at"] = str(epoch_now())
-            revoked += 1
-    if revoked:
-        save_json(PRIVATE_LINKS_FILE, links)
-    return revoked
-
-
-def delete_room_everywhere(room: str, revoke_invites: bool = True) -> dict[str, int]:
-    rooms = load_json(CHAT_FILE)
-    online = load_json(ONLINE_FILE)
-    settings = load_json(ROOM_SETTINGS_FILE)
-
-    deleted_messages = len(rooms.get(room, [])) if isinstance(rooms.get(room, []), list) else 0
-    existed = int(room in rooms or room in online or room in settings or packet_room_dir(room).exists())
-
-    rooms.pop(room, None)
-    online.pop(room, None)
-    settings.pop(room, None)
-    delete_room_packet_files(room)
-
-    save_json(CHAT_FILE, rooms)
-    save_json(ONLINE_FILE, online)
-    save_json(ROOM_SETTINGS_FILE, settings)
-
-    revoked_links = revoke_links_for_room(room) if revoke_invites else 0
-    return {
-        "existed": existed,
-        "deleted_messages": deleted_messages,
-        "revoked_links": revoked_links,
-    }
-
-
-def collect_known_rooms() -> set[str]:
-    rooms = set(load_json(CHAT_FILE).keys())
-    rooms.update(load_json(ONLINE_FILE).keys())
-    rooms.update(load_json(ROOM_SETTINGS_FILE).keys())
-
-    links = load_json(PRIVATE_LINKS_FILE)
-    for link_data in links.values():
-        if not isinstance(link_data, dict):
-            continue
-        linked_room = decrypt_message(str(link_data.get("room", "")))
-        if linked_room and not linked_room.startswith("[Pesan tidak dapat didekripsi]"):
-            rooms.add(linked_room)
-    return rooms
-
-
-def get_admin_room_rows(show_only_active: bool = False) -> list[dict[str, Any]]:
-    now = epoch_now()
-    rooms_data = load_json(CHAT_FILE)
-    online_data = load_json(ONLINE_FILE)
-    links = load_json(PRIVATE_LINKS_FILE)
-    rows: list[dict[str, Any]] = []
-
-    active_link_count_by_room: dict[str, int] = {}
-    total_link_count_by_room: dict[str, int] = {}
-    for link_data in links.values():
-        if not isinstance(link_data, dict):
-            continue
-        linked_room = decrypt_message(str(link_data.get("room", "")))
-        if not linked_room or linked_room.startswith("[Pesan tidak dapat didekripsi]"):
-            continue
-        total_link_count_by_room[linked_room] = total_link_count_by_room.get(linked_room, 0) + 1
-        if link_data.get("active", True):
-            active_link_count_by_room[linked_room] = active_link_count_by_room.get(linked_room, 0) + 1
-
-    for room in collect_known_rooms():
-        active_users_map = get_active_users_from_online(online_data, room, now)
-        if show_only_active and not active_users_map:
-            continue
-        config = get_room_config(room)
-        last_active_at = int(config.get("last_active_at") or 0)
-        messages = rooms_data.get(room, [])
-        rows.append(
-            {
-                "room": room,
-                "status": "ACTIVE" if active_users_map else "IDLE",
-                "active_users": len(active_users_map),
-                "users": ", ".join(active_users_map.keys()) if active_users_map else "-",
-                "messages": len(messages) if isinstance(messages, list) else 0,
-                "auto_destroy": choice_from_minutes(config.get("auto_destroy_minutes")),
-                "active_links": active_link_count_by_room.get(room, 0),
-                "total_links": total_link_count_by_room.get(room, 0),
-                "last_active_at": last_active_at,
-            }
-        )
-
-    return sorted(rows, key=lambda item: (item["status"] != "ACTIVE", -int(item["last_active_at"]), item["room"]))
-
-
-def render_qr_for_last_link() -> None:
-    share_url = st.session_state.get("last_room_share_url", "")
-    if not share_url:
-        return
-
-    st.code(share_url, language="text")
-    try:
-        qr_png = make_qr_png(share_url)
-        st.image(qr_png, caption="QR invite link", use_container_width=True)
-        st.download_button(
-            "DOWNLOAD QR PNG",
-            data=qr_png,
-            file_name="antitrust_room_invite_qr.png",
-            mime="image/png",
-            key="download_invite_qr_png",
-            use_container_width=True,
-        )
-    except Exception as exc:
-        st.error(f"qr_error={exc}")
-    st.caption("Bagikan link atau QR ini ke user. Room akan otomatis terkunci sesuai target_room.")
-
-
-def render_admin_login(admin_password: str) -> bool:
-    if st.session_state.get("admin_authenticated"):
+def looks_like_script(data: bytes) -> bool:
+    sample = data[:4096].lstrip().lower()
+    if any(sample.startswith(sig.lower()) for sig in SHELL_SIGNATURES):
         return True
-
-    password = st.text_input("admin_password:", type="password", key="admin_password_input")
-    if st.button("LOGIN ADMIN", key="admin_login_button", use_container_width=True):
-        if hmac.compare_digest(password, admin_password):
-            st.session_state["admin_authenticated"] = True
-            st.success("admin_login=success")
-            st.rerun()
-        else:
-            st.error("admin_login=failed")
-    return False
-
-
-def render_admin_create_link(public_url: str) -> None:
-    st.markdown("#### share_link")
-    target_room = st.text_input("target_room:", placeholder="black-room-01", key="admin_target_room_input")
-    target_public_url = st.text_input(
-        "public_app_url:",
-        value=public_url,
-        placeholder="https://antitrust.streamlit.app",
-        key="admin_public_url_input",
-    )
-
-    if st.button("CREATE ROOM SHARE LINK", key="create_room_share_link", use_container_width=True):
-        clean_room = target_room.strip()
-        if not clean_room:
-            st.error("target_room tidak boleh kosong.")
-        else:
-            token = create_room_share_token(clean_room)
-            st.session_state["last_room_share_url"] = build_share_url(token, target_public_url)
-            st.session_state["last_room_share_target"] = clean_room
-            st.success(f"share_link=created | room={clean_room}")
-
-    render_qr_for_last_link()
-
-
-def render_admin_room_dashboard() -> None:
-    st.markdown("#### active_rooms")
-    show_only_active = st.toggle("show_only_active_rooms", value=True, key="admin_show_only_active_rooms")
-    rows = get_admin_room_rows(show_only_active=show_only_active)
-
-    if not rows:
-        st.info("active_rooms=empty")
-        return
-
-    table_rows = [
-        {
-            "room": row["room"],
-            "status": row["status"],
-            "users": row["users"],
-            "messages": row["messages"],
-            "links": f"{row['active_links']}/{row['total_links']}",
-            "auto_destroy": row["auto_destroy"],
-        }
-        for row in rows
-    ]
-    st.dataframe(table_rows, hide_index=True, use_container_width=True)
-
-    st.markdown("#### delete_room")
-    room_options = [row["room"] for row in rows]
-    selected_room = st.selectbox("selected_room:", options=room_options, key="admin_delete_room_select")
-    revoke_invites = st.toggle("revoke_invite_links_for_room", value=True, key="admin_revoke_invites_on_delete")
-    confirm_text = st.text_input("type_DELETE_to_confirm:", key="admin_delete_confirm")
-
-    if st.button("DELETE SELECTED ROOM", type="primary", key="admin_delete_room_button", use_container_width=True):
-        if confirm_text != "DELETE":
-            st.error("delete_blocked=confirmation_required")
-        else:
-            result = delete_room_everywhere(selected_room, revoke_invites=revoke_invites)
-            st.success(
-                "room_deleted=true | "
-                f"room={selected_room} | "
-                f"messages={result['deleted_messages']} | "
-                f"revoked_links={result['revoked_links']}"
-            )
-            st.rerun()
-
-
-def render_admin_panel() -> None:
-    admin_password = get_secret("CHAT_ADMIN_PASSWORD", "")
-    public_url = get_secret("PUBLIC_APP_URL", PUBLIC_APP_URL)
-
-    st.markdown("---")
-    st.markdown(
-        """
-        <div class="admin-center-title">
-          <h3>admin_panel</h3>
-          <div class="admin-center-note">panel=always_visible | collapse_removed=true</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    if not admin_password:
-        st.error("CHAT_ADMIN_PASSWORD belum diset.")
-        st.caption("Atur di Streamlit Secrets atau environment variable agar panel admin aktif.")
-        st.code('CHAT_ADMIN_PASSWORD = "ganti-password-kuat"\nPUBLIC_APP_URL = "https://antitrust.streamlit.app"', language="toml")
-        return
-
-    if not render_admin_login(admin_password):
-        st.caption("Top secrets")
-        return
-
-    st.success("admin_session=active")
-    if st.button("LOG OUT ADMIN", key="admin_logout_button", use_container_width=True):
-        for key in [
-            "admin_authenticated",
-            "admin_password_input",
-            "last_room_share_url",
-            "last_room_share_target",
-            "admin_delete_confirm",
-        ]:
-            st.session_state.pop(key, None)
-        st.success("admin_logout=success")
-        st.rerun()
-
-    render_admin_create_link(public_url)
-    st.markdown("---")
-    render_admin_room_dashboard()
-
-def get_skull_image_data_uri() -> str:
-    skull_path = Path(SKULL_IMAGE_FILE)
-
-    if skull_path.exists():
-        svg_bytes = skull_path.read_bytes()
-    else:
-        svg_bytes = b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="skull lock">\n  <rect width="512" height="512" fill="#000000"/>\n  <path d="M256 46C149 46 82 116 82 213c0 62 29 106 77 128v67c0 30 24 54 54 54h86c30 0 54-24 54-54v-67c48-22 77-66 77-128C430 116 363 46 256 46Z" fill="none" stroke="#00ff66" stroke-width="18" stroke-linejoin="round"/>\n  <path d="M178 238c0-29 20-52 46-52s46 23 46 52-20 52-46 52-46-23-46-52Zm108 0c0-29 20-52 46-52s46 23 46 52-20 52-46 52-46-23-46-52Z" fill="#00ff66" fill-opacity="0.88"/>\n  <path d="M256 289l-25 50h50l-25-50Z" fill="none" stroke="#00ff66" stroke-width="16" stroke-linejoin="round"/>\n  <path d="M183 371h146M202 407h108M226 371v72M256 371v72M286 371v72" fill="none" stroke="#00ff66" stroke-width="14" stroke-linecap="round"/>\n  <path d="M87 89l338 338M425 89L87 427" stroke="#00ff66" stroke-width="8" stroke-opacity="0.32"/>\n</svg>'
-
-    encoded = base64.b64encode(svg_bytes).decode("ascii")
-    return f"data:image/svg+xml;base64,{encoded}"
-
-
-def render_locked_landing(show_admin_panel: bool = True) -> None:
-    skull_src = get_skull_image_data_uri()
-    st.markdown(
-        f"""
-        <div class="skull-lock-frame">
-          <img class="skull-lock-img" src="{skull_src}" alt="locked private channel skull" />
-        </div>
-        <p class="ascii-lock-note">public_channel=disabled | invite_required=true</p>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    if show_admin_panel:
-        admin_left, admin_mid, admin_right = st.columns([0.18, 0.64, 0.18])
-        with admin_mid:
-            render_admin_panel()
-
-
-# ==============================
-# ROOM SETTINGS + AUTO DESTROY
-# ==============================
-def parse_destroy_choice(choice: str) -> int | None:
-    if choice == "Never":
-        return None
-    return int(choice.split()[0])
-
-
-def choice_from_minutes(minutes: int | None) -> str:
-    if minutes is None:
-        return "Never"
-    return f"{minutes} menit"
-
-
-def get_room_config(room: str) -> dict[str, Any]:
-    settings = load_json(ROOM_SETTINGS_FILE)
-    config = settings.get(room, {})
-    mode = config.get("destroy_mode", "auto")
-    minutes = config.get("auto_destroy_minutes", DEFAULT_AUTO_DESTROY_MINUTES)
-    if mode == "never":
-        minutes = None
-    elif minutes not in {10, 20, 30, 40, 50, 60}:
-        minutes = DEFAULT_AUTO_DESTROY_MINUTES
-    return {
-        "destroy_mode": "never" if minutes is None else "auto",
-        "auto_destroy_minutes": minutes,
-        "last_active_at": int(config.get("last_active_at", epoch_now())),
-    }
-
-
-def save_room_config(room: str, config: dict[str, Any]) -> None:
-    settings = load_json(ROOM_SETTINGS_FILE)
-    settings[room] = config
-    save_json(ROOM_SETTINGS_FILE, settings)
-
-
-def set_room_destroy_choice(room: str, choice: str) -> None:
-    config = get_room_config(room)
-    minutes = parse_destroy_choice(choice)
-    config["destroy_mode"] = "never" if minutes is None else "auto"
-    config["auto_destroy_minutes"] = minutes
-    config.setdefault("last_active_at", epoch_now())
-    save_room_config(room, config)
-
-
-def mark_room_active(room: str) -> None:
-    config = get_room_config(room)
-    config["last_active_at"] = epoch_now()
-    save_room_config(room, config)
-
-
-def panic_clear_messages(room: str) -> int:
-    rooms = load_json(CHAT_FILE)
-    message_count = len(rooms.get(room, [])) if isinstance(rooms.get(room, []), list) else 0
-    rooms[room] = []
-    delete_room_packet_files(room)
-    save_json(CHAT_FILE, rooms)
-    mark_room_active(room)
-    return message_count
-
-
-def get_active_users_from_online(online: dict[str, Any], room: str, now: int) -> dict[str, int]:
-    active: dict[str, int] = {}
-    for user, last_seen in online.get(room, {}).items():
-        try:
-            last_seen_int = int(last_seen)
-        except (TypeError, ValueError):
-            continue
-        if now - last_seen_int <= ONLINE_ACTIVE_SECONDS:
-            active[str(user)] = last_seen_int
-    return active
-
-
-def purge_inactive_rooms() -> list[str]:
-    now = epoch_now()
-    rooms = load_json(CHAT_FILE)
-    online = load_json(ONLINE_FILE)
-    settings = load_json(ROOM_SETTINGS_FILE)
-    all_rooms = set(rooms.keys()) | set(online.keys()) | set(settings.keys())
-    destroyed: list[str] = []
-    changed = False
-
-    for room in list(all_rooms):
-        config = get_room_config(room)
-        minutes = config.get("auto_destroy_minutes")
-        active_users = get_active_users_from_online(online, room, now)
-
-        if online.get(room) != active_users:
-            online[room] = active_users
-            changed = True
-
-        if active_users:
-            config["last_active_at"] = now
-            settings[room] = config
-            changed = True
-            continue
-
-        if minutes is None:
-            settings[room] = config
-            continue
-
-        last_active_at = int(config.get("last_active_at") or now)
-        if now - last_active_at >= int(minutes) * 60:
-            delete_room_packet_files(room)
-            rooms.pop(room, None)
-            online.pop(room, None)
-            settings.pop(room, None)
-            destroyed.append(room)
-            changed = True
-        else:
-            settings[room] = config
-
-    if changed:
-        save_json(CHAT_FILE, rooms)
-        save_json(ONLINE_FILE, online)
-        save_json(ROOM_SETTINGS_FILE, settings)
-
-    return destroyed
-
-# ==============================
-# CHAT HELPERS
-# ==============================
-def make_text_message(username: str, text: str) -> dict[str, str]:
-    return {
-        "id": str(uuid.uuid4()),
-        "type": "text",
-        "username": username,
-        "text": encrypt_message(text),
-        "time": wib_now(),
-        "created_at": str(epoch_now()),
-    }
-
-
-def make_image_thumbnail(data: bytes) -> tuple[str, str]:
-    if Image is None:
-        return "", ""
-    try:
-        with Image.open(io.BytesIO(data)) as image:
-            image.thumbnail(THUMBNAIL_MAX_SIZE)
-            if image.mode not in {"RGB", "L"}:
-                image = image.convert("RGB")
-            buffer = io.BytesIO()
-            image.save(buffer, format="JPEG", quality=68, optimize=True)
-            thumb_b64 = base64.b64encode(buffer.getvalue()).decode("ascii")
-            return encrypt_message(thumb_b64), "image/jpeg"
-    except Exception:
-        return "", ""
-
-
-def make_media_message(
-    room: str,
-    username: str,
-    media_type: str,
-    data: bytes,
-    mime_type: str,
-    filename: str,
-) -> dict[str, str]:
-    message_id = str(uuid.uuid4())
-    packet_path = save_encrypted_packet(room, message_id, data)
-    message: dict[str, str] = {
-        "id": message_id,
-        "type": media_type,
-        "username": username,
-        "storage": "external",
-        "packet_path": packet_path,
-        "mime_type": mime_type,
-        "filename": filename,
-        "size_bytes": str(len(data)),
-        "time": wib_now(),
-        "created_at": str(epoch_now()),
-    }
-    if media_type == "image":
-        thumbnail_payload, thumbnail_mime = make_image_thumbnail(data)
-        if thumbnail_payload:
-            message["thumbnail_payload"] = thumbnail_payload
-            message["thumbnail_mime"] = thumbnail_mime
-    return message
-
-
-def append_text_message(room: str, username: str, message_text: str) -> None:
-    rooms = load_json(CHAT_FILE)
-    rooms.setdefault(room, [])
-    rooms[room].append(make_text_message(username, message_text))
-    save_json(CHAT_FILE, rooms)
-    mark_room_active(room)
-
-
-def append_media_message(room: str, username: str, media_type: str, data: bytes, mime_type: str, filename: str) -> None:
-    rooms = load_json(CHAT_FILE)
-    rooms.setdefault(room, [])
-    rooms[room].append(make_media_message(room, username, media_type, data, mime_type, filename))
-    save_json(CHAT_FILE, rooms)
-    mark_room_active(room)
-
-
-def update_online_status(room: str, username: str) -> list[str]:
-    online = load_json(ONLINE_FILE)
-    now = epoch_now()
-    online.setdefault(room, {})
-    online[room][username] = now
-    save_json(ONLINE_FILE, online)
-    mark_room_active(room)
-    active_users = get_active_users_from_online(online, room, now)
-    return [user for user in active_users.keys() if user != username]
-
-# ==============================
-# FILE SECURITY
-# ==============================
-def get_file_extension(filename: str) -> str:
-    return filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if not is_text_like(data):
+        return False
+    hits = sum(1 for keyword in SHELL_KEYWORDS if keyword.lower() in sample)
+    syntax = any(token in sample for token in [b"#!/", b"function ", b"; then", b"do\n", b"done\n"])
+    return hits >= 2 or (hits >= 1 and syntax)
 
 
 def detect_image_format(data: bytes) -> str | None:
@@ -1017,35 +256,6 @@ def detect_image_format(data: bytes) -> str | None:
     if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         return "webp"
     return None
-
-
-def is_probably_text_payload(data: bytes) -> bool:
-    sample = data[:4096]
-    if not sample:
-        return False
-    printable = sum(1 for byte in sample if byte in b"\t\n\r" or 32 <= byte <= 126)
-    return printable / max(len(sample), 1) > 0.85
-
-
-def looks_like_shell_payload(data: bytes) -> bool:
-    sample = data[:4096].lstrip().lower()
-    if any(sample.startswith(signature.lower()) for signature in SHELL_SIGNATURES):
-        return True
-    if not is_probably_text_payload(data):
-        return False
-    keyword_hits = sum(1 for keyword in SHELL_KEYWORDS if keyword.lower() in sample)
-    shell_syntax_hits = sum(token in sample for token in [b"#!/", b"function ", b"; then", b"fi\n", b"for ", b"do\n", b"done\n"])
-    return keyword_hits >= 2 or (keyword_hits >= 1 and shell_syntax_hits >= 1)
-
-
-def security_destroy_for_disguised_image(room: str) -> None:
-    deleted_count = panic_clear_messages(room)
-    reset_media_packet("image_packet")
-    st.error(
-        "SECURITY ALERT: Image Packet terdeteksi sebagai file shell/script yang menyamar. "
-        f"Payload diblokir dan {deleted_count} pesan di room ini langsung dihancurkan."
-    )
-    st.stop()
 
 
 def detect_document_format(data: bytes) -> str | None:
@@ -1061,10 +271,9 @@ def detect_document_format(data: bytes) -> str | None:
                 return None
             for name in names:
                 normalized = name.replace("\\", "/")
-                lowered_name = normalized.lower()
-                if normalized.startswith("/") or "../" in normalized:
-                    return None
-                if lowered_name.endswith((".sh", ".bash", ".zsh", ".ps1", ".bat", ".cmd", ".exe", ".dll", ".scr", ".vbs")):
+                lower = normalized.lower()
+                suffix = Path(lower).suffix.lstrip(".")
+                if normalized.startswith("/") or "../" in normalized or suffix in RISKY_EXTENSIONS:
                     return None
             if any(name.startswith("word/") for name in lowered):
                 return "docx"
@@ -1077,473 +286,539 @@ def detect_document_format(data: bytes) -> str | None:
     return None
 
 
-def validate_document_file(uploaded_file: Any) -> tuple[bytes, str, str] | None:
+def validate_upload(uploaded_file: Any, media_type: str) -> tuple[bytes, str, str] | None:
     if uploaded_file is None:
-        st.error("Document Packet belum dipilih.")
+        st.warning("Pilih file terlebih dahulu.")
         return None
     data = uploaded_file.getvalue()
-    if not data:
-        st.error("File dokumen kosong atau gagal dibaca.")
-        return None
-    if len(data) > MAX_MEDIA_BYTES:
-        st.error(f"Ukuran dokumen terlalu besar. Maksimal {format_bytes(MAX_MEDIA_BYTES)} per dokumen.")
-        return None
-    filename = getattr(uploaded_file, "name", "document_packet") or "document_packet"
-    extension = get_file_extension(filename)
-    if extension not in ALLOWED_DOCUMENT_TYPES:
-        st.error("Document Packet hanya menerima PDF, DOCX, XLSX, dan PPTX. File script/shell tidak diizinkan.")
-        return None
-    if looks_like_shell_payload(data):
-        st.error("SECURITY BLOCK: Dokumen terindikasi shell/script. Payload diblokir dan tidak disimpan.")
-        return None
-    real_format = detect_document_format(data)
-    if real_format is None:
-        st.error("Document Packet tidak valid. File harus PDF atau Office Open XML asli, bukan file yang menyamar.")
-        return None
-    if real_format != extension:
-        st.error(f"SECURITY BLOCK: Ekstensi .{extension} tidak cocok dengan format asli .{real_format}. Payload diblokir.")
-        return None
-    return data, DOCUMENT_MIME_BY_EXT[real_format], filename
+    filename = safe_filename(getattr(uploaded_file, "name", "packet.bin"))
+    extension = ext_of(filename)
+    mime_type = getattr(uploaded_file, "type", "application/octet-stream") or "application/octet-stream"
 
-
-def validate_media_file(uploaded_file: Any, expected_prefix: str, room: str | None = None) -> tuple[bytes, str, str] | None:
-    if uploaded_file is None:
-        st.error("File belum dipilih.")
-        return None
-    data = uploaded_file.getvalue()
     if not data:
         st.error("File kosong atau gagal dibaca.")
         return None
     if len(data) > MAX_MEDIA_BYTES:
-        st.error(f"Ukuran file terlalu besar. Maksimal {format_bytes(MAX_MEDIA_BYTES)} per media.")
+        st.error(f"Ukuran file terlalu besar. Maksimal {format_bytes(MAX_MEDIA_BYTES)}.")
+        return None
+    if extension in RISKY_EXTENSIONS or looks_like_script(data):
+        st.error("File diblokir karena terindikasi script/executable.")
         return None
 
-    mime_type = getattr(uploaded_file, "type", "") or "application/octet-stream"
-    filename = getattr(uploaded_file, "name", "media_payload") or "media_payload"
-    extension = get_file_extension(filename)
-
-    if expected_prefix == "image":
-        if looks_like_shell_payload(data) and room:
-            security_destroy_for_disguised_image(room)
-        real_image_format = detect_image_format(data)
-        if real_image_format is None:
-            st.error("File yang dikirim bukan gambar valid. Payload diblokir dan tidak disimpan.")
-            return None
-        if extension not in ALLOWED_IMAGE_TYPES:
-            st.error("Ekstensi Image Packet harus PNG, JPG, JPEG, atau WEBP.")
+    if media_type == "image":
+        real_format = detect_image_format(data)
+        if real_format is None or extension not in ALLOWED_IMAGE_TYPES:
+            st.error("Image harus PNG, JPG/JPEG, atau WEBP asli.")
             return None
         if Image is not None:
             try:
-                with Image.open(io.BytesIO(data)) as image_check:
-                    image_check.verify()
+                with Image.open(io.BytesIO(data)) as image:
+                    image.verify()
             except Exception:
-                st.error("Image Packet rusak/tidak valid. Payload diblokir dan tidak disimpan.")
+                st.error("Image rusak atau tidak valid.")
                 return None
-        mime_type = "image/jpeg" if real_image_format == "jpg" else f"image/{real_image_format}"
+        return data, "image/jpeg" if real_format == "jpg" else f"image/{real_format}", filename
 
-    if expected_prefix == "audio":
+    if media_type == "audio":
         if extension not in ALLOWED_AUDIO_TYPES:
-            st.error("Voice Packet hanya menerima WAV, MP3, OGG, M4A, AAC, FLAC, atau WEBM.")
+            st.error("Audio harus WAV, MP3, OGG, M4A, AAC, FLAC, atau WEBM.")
             return None
         if not (mime_type.startswith("audio/") or mime_type in {"video/webm", "application/octet-stream"}):
-            st.error("File yang dikirim bukan audio valid.")
+            st.error("Format audio tidak valid.")
             return None
+        return data, mime_type, filename
 
-    return data, mime_type, filename
+    if media_type == "document":
+        real_format = detect_document_format(data)
+        if extension not in ALLOWED_DOCUMENT_TYPES or real_format != extension:
+            st.error("Dokumen harus PDF, DOCX, XLSX, atau PPTX asli, bukan file yang menyamar.")
+            return None
+        return data, DOCUMENT_MIME[real_format], filename
 
-# ==============================
-# RENDER CHAT + PACKETS
-# ==============================
-def render_media_payload(msg: dict[str, Any]) -> str:
-    msg_type = str(msg.get("type", "text"))
-    filename = html.escape(str(msg.get("filename", "media_payload")), quote=True)
-    size_label = html.escape(format_bytes(msg.get("size_bytes", 0)))
-
-    if msg_type == "image":
-        thumbnail = decrypt_message(str(msg.get("thumbnail_payload", ""))) if msg.get("thumbnail_payload") else ""
-        thumbnail_mime = html.escape(str(msg.get("thumbnail_mime", "image/jpeg")), quote=True)
-        if thumbnail and not thumbnail.startswith("[Pesan tidak dapat didekripsi]"):
-            safe_thumb = html.escape(thumbnail, quote=True)
-            preview = f'<img class="chat-image" src="data:{thumbnail_mime};base64,{safe_thumb}" alt="image packet preview" />'
-        else:
-            preview = '<span class="media-placeholder">thumbnail=not_available</span>'
-        return f'<span class="media-label">[IMAGE_PACKET] {filename}</span>{preview}<span class="media-note">size={size_label} | original=packet_viewer</span>'
-
-    if msg_type == "audio":
-        return f'<span class="media-label">[VOICE_PACKET] {filename}</span><span class="chat-doc">size={size_label} | playback=packet_viewer</span>'
-
-    if msg_type == "document":
-        return f'<span class="media-label">[DOCUMENT_PACKET] {filename}</span><span class="chat-doc">size={size_label} | download=packet_viewer</span>'
-
-    return "[UNKNOWN_PACKET] Format pesan tidak dikenal."
+    return None
 
 
-def render_chat_box(messages: list[dict[str, Any]], username: str) -> str:
+def make_thumbnail(data: bytes) -> tuple[str, str]:
+    if Image is None:
+        return "", ""
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            image.thumbnail((320, 240))
+            if image.mode not in {"RGB", "L"}:
+                image = image.convert("RGB")
+            buf = io.BytesIO()
+            image.save(buf, format="JPEG", quality=72, optimize=True)
+            return base64.b64encode(buf.getvalue()).decode("ascii"), "image/jpeg"
+    except Exception:
+        return "", ""
+
+
+def save_packet(room: str, message_id: str, data: bytes) -> str:
+    directory = packet_room_dir(room)
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"{message_id}.bin"
+    path.write_bytes(encrypt_bytes(data))
+    return path.relative_to(DATA_DIR).as_posix()
+
+
+def resolve_packet_path(relative_path: str) -> Path | None:
+    if not relative_path:
+        return None
+    candidate = (DATA_DIR / relative_path).resolve()
+    try:
+        candidate.relative_to(DATA_DIR.resolve())
+    except ValueError:
+        return None
+    return candidate if candidate.is_file() else None
+
+
+def read_packet(relative_path: str) -> bytes | None:
+    path = resolve_packet_path(relative_path)
+    if path is None:
+        return None
+    return decrypt_bytes(path.read_bytes())
+
+
+def delete_room_packets(room: str) -> None:
+    shutil.rmtree(packet_room_dir(room), ignore_errors=True)
+
+
+def parse_destroy_choice(choice: str) -> int | None:
+    return None if choice == "Never" else int(choice.split()[0])
+
+
+def choice_from_minutes(minutes: int | None) -> str:
+    return "Never" if minutes is None else f"{minutes} menit"
+
+
+def get_room_config(room: str) -> dict[str, Any]:
+    settings = load_json(ROOM_SETTINGS_FILE)
+    key = room_key(room)
+    config = settings.get(key, {}) if isinstance(settings.get(key), dict) else {}
+    minutes = config.get("auto_destroy_minutes", DEFAULT_DESTROY_MINUTES)
+    if minutes not in {None, 10, 20, 30, 60}:
+        minutes = DEFAULT_DESTROY_MINUTES
+    return {"auto_destroy_minutes": minutes, "last_active_at": int(config.get("last_active_at", now_epoch()))}
+
+
+def save_room_config(room: str, config: dict[str, Any]) -> None:
+    settings = load_json(ROOM_SETTINGS_FILE)
+    settings[room_key(room)] = config
+    atomic_write_json(ROOM_SETTINGS_FILE, settings)
+
+
+def mark_room_active(room: str) -> None:
+    config = get_room_config(room)
+    config["last_active_at"] = now_epoch()
+    save_room_config(room, config)
+
+
+def update_online(room: str, username: str) -> list[str]:
+    online = load_json(ONLINE_FILE)
+    key = room_key(room)
+    now = now_epoch()
+    online.setdefault(key, {})
+    online[key][username] = now
+    active = {user: int(ts) for user, ts in online[key].items() if now - int(ts) <= ONLINE_ACTIVE_SECONDS}
+    online[key] = active
+    atomic_write_json(ONLINE_FILE, online)
+    mark_room_active(room)
+    return [user for user in active if user != username]
+
+
+def purge_inactive_rooms() -> int:
+    rooms = load_json(CHAT_FILE)
+    online = load_json(ONLINE_FILE)
+    settings = load_json(ROOM_SETTINGS_FILE)
+    now = now_epoch()
+    destroyed = 0
+    changed = False
+
+    for key, config in list(settings.items()):
+        active = {u: int(ts) for u, ts in online.get(key, {}).items() if now - int(ts) <= ONLINE_ACTIVE_SECONDS}
+        online[key] = active
+        minutes = config.get("auto_destroy_minutes", DEFAULT_DESTROY_MINUTES)
+        if active:
+            config["last_active_at"] = now
+            settings[key] = config
+            changed = True
+            continue
+        if minutes is None:
+            settings[key] = config
+            continue
+        last_active = int(config.get("last_active_at", now))
+        if now - last_active >= int(minutes) * 60:
+            rooms.pop(key, None)
+            online.pop(key, None)
+            settings.pop(key, None)
+            # packet directory name uses the same room_key but original room is not stored; remove by key directly.
+            shutil.rmtree(PACKET_DIR / key, ignore_errors=True)
+            destroyed += 1
+            changed = True
+
+    if changed:
+        atomic_write_json(CHAT_FILE, rooms)
+        atomic_write_json(ONLINE_FILE, online)
+        atomic_write_json(ROOM_SETTINGS_FILE, settings)
+    return destroyed
+
+
+def rate_limited(action: str) -> bool:
+    key = f"rate::{action}"
+    now = time.monotonic()
+    last = float(st.session_state.get(key, 0))
+    if now - last < MESSAGE_RATE_LIMIT_SECONDS:
+        st.warning("Terlalu cepat. Coba kirim lagi sebentar.")
+        return True
+    st.session_state[key] = now
+    return False
+
+
+def append_text(room: str, username: str, text: str) -> None:
+    clean = text.strip()[:MAX_TEXT_LENGTH]
+    if not clean:
+        return
+    rooms = load_json(CHAT_FILE)
+    key = room_key(room)
+    rooms.setdefault(key, [])
+    rooms[key].append({
+        "id": secrets.token_urlsafe(18),
+        "type": "text",
+        "username": username,
+        "text": encrypt_text(clean),
+        "time": now_wib_label(),
+        "created_at": now_epoch(),
+    })
+    atomic_write_json(CHAT_FILE, rooms)
+    mark_room_active(room)
+
+
+def append_media(room: str, username: str, media_type: str, data: bytes, mime_type: str, filename: str) -> None:
+    rooms = load_json(CHAT_FILE)
+    key = room_key(room)
+    rooms.setdefault(key, [])
+    message_id = secrets.token_urlsafe(18)
+    packet_path = save_packet(room, message_id, data)
+    message: dict[str, Any] = {
+        "id": message_id,
+        "type": media_type,
+        "username": username,
+        "packet_path": packet_path,
+        "mime_type": mime_type,
+        "filename": filename,
+        "size_bytes": len(data),
+        "time": now_wib_label(),
+        "created_at": now_epoch(),
+    }
+    if media_type == "image":
+        thumb, thumb_mime = make_thumbnail(data)
+        if thumb:
+            message["thumbnail"] = encrypt_text(thumb)
+            message["thumbnail_mime"] = thumb_mime
+    rooms[key].append(message)
+    atomic_write_json(CHAT_FILE, rooms)
+    mark_room_active(room)
+
+
+def load_messages(room: str) -> list[dict[str, Any]]:
+    rooms = load_json(CHAT_FILE)
+    messages = rooms.get(room_key(room), [])
+    return messages if isinstance(messages, list) else []
+
+
+def panic_destroy(room: str) -> int:
+    rooms = load_json(CHAT_FILE)
+    key = room_key(room)
+    count = len(rooms.get(key, [])) if isinstance(rooms.get(key), list) else 0
+    rooms[key] = []
+    atomic_write_json(CHAT_FILE, rooms)
+    delete_room_packets(room)
+    mark_room_active(room)
+    return count
+
+
+def token_hash(token: str) -> str:
+    return hmac_digest(token)
+
+
+def create_invite(room: str, ttl_hours: int = INVITE_DEFAULT_TTL_HOURS) -> str:
+    token = secrets.token_urlsafe(32)
+    invites = load_json(INVITE_FILE)
+    invites[token_hash(token)] = {
+        "room": encrypt_text(room),
+        "created_at": now_epoch(),
+        "expires_at": now_epoch() + max(1, ttl_hours) * 3600,
+        "revoked": False,
+    }
+    atomic_write_json(INVITE_FILE, invites)
+    return token
+
+
+def resolve_invite(token: str | None) -> str | None:
+    if not token:
+        return None
+    invites = load_json(INVITE_FILE)
+    item = invites.get(token_hash(token))
+    if not isinstance(item, dict) or item.get("revoked"):
+        return None
+    if int(item.get("expires_at", 0)) < now_epoch():
+        return None
+    room = decrypt_text(str(item.get("room", ""))).strip()
+    return room or None
+
+
+def public_base_url() -> str:
+    configured = get_secret("PUBLIC_APP_URL", "").strip().rstrip("/")
+    return configured or "http://localhost:8501"
+
+
+def build_invite_url(token: str) -> str:
+    return f"{public_base_url()}?{urlencode({'invite': token})}"
+
+
+def get_query_param(name: str) -> str | None:
+    try:
+        value = st.query_params.get(name)
+        if isinstance(value, list):
+            return value[0] if value else None
+        return value
+    except Exception:
+        params = st.experimental_get_query_params()
+        values = params.get(name, [])
+        return values[0] if values else None
+
+
+def render_chat(messages: list[dict[str, Any]], username: str) -> str:
     if not messages:
-        rows = '<p class="empty-line">[EMPTY] Belum ada pesan terenkripsi di room ini.</p>'
-    else:
-        rows = ""
-        for msg in messages:
-            msg_user = str(msg.get("username", "unknown"))
-            msg_type = str(msg.get("type", "text"))
-            is_me = msg_user == username
-            css_class = "chat-bubble me" if is_me else "chat-bubble"
-            safe_user = html.escape(msg_user)
-            safe_time = html.escape(str(msg.get("time", "")))
-            if msg_type == "text":
-                content = html.escape(decrypt_message(str(msg.get("text", ""))))
-            else:
-                content = render_media_payload(msg)
-            rows += f"""
-            <div class="chat-line">
-              <div class="{css_class}">{content}</div>
-              <div class="chat-meta">{safe_user}{' / you' if is_me else ''} :: {safe_time}</div>
-            </div>
-            """
-    return f"""
-    <style>{CHAT_COMPONENT_CSS}</style>
-    <div class="chat-box" id="chat-box">{rows}</div>
-    <script>
-      const box = document.getElementById('chat-box');
-      if (box) box.scrollTop = box.scrollHeight;
-    </script>
-    """
+        return CHAT_CSS + '<div class="chat"><div class="empty">Belum ada pesan. Mulai percakapan aman.</div></div>'
+    rows = ""
+    for msg in messages[-120:]:
+        sender = html.escape(str(msg.get("username", "unknown")))
+        is_me = sender == html.escape(username)
+        time_label = html.escape(str(msg.get("time", "")))
+        msg_type = str(msg.get("type", "text"))
+        if msg_type == "text":
+            content = html.escape(decrypt_text(str(msg.get("text", ""))))
+        else:
+            filename = html.escape(str(msg.get("filename", "packet")))
+            size = html.escape(format_bytes(msg.get("size_bytes", 0)))
+            label = {"image": "Image", "audio": "Voice", "document": "Document"}.get(msg_type, "Packet")
+            content = f'<span class="packet">{label} Packet</span>{filename}<br><small>{size} · buka di Packet Viewer</small>'
+            if msg_type == "image" and msg.get("thumbnail"):
+                thumb = decrypt_text(str(msg.get("thumbnail", "")))
+                mime = html.escape(str(msg.get("thumbnail_mime", "image/jpeg")))
+                if thumb and not thumb.startswith("["):
+                    content += f'<img class="thumb" src="data:{mime};base64,{html.escape(thumb, quote=True)}" />'
+        cls = "row me" if is_me else "row"
+        rows += f'<div class="{cls}"><div class="bubble">{content}<div class="meta">{sender}{" · kamu" if is_me else ""} · {time_label}</div></div></div>'
+    return CHAT_CSS + f'<div class="chat">{rows}</div>'
 
 
-def list_packet_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [msg for msg in messages if str(msg.get("type", "")) in {"image", "audio", "document"}]
-
-
-def packet_label(msg: dict[str, Any]) -> str:
-    msg_type = str(msg.get("type", "packet")).upper()
-    filename = str(msg.get("filename", "packet"))
-    user = str(msg.get("username", "unknown"))
-    timestamp = str(msg.get("time", ""))
-    size_label = format_bytes(msg.get("size_bytes", 0))
-    return f"[{msg_type}] {filename} | {size_label} | {user} | {timestamp}"
-
-
-def render_packet_viewer(room: str, messages: list[dict[str, Any]]) -> None:
-    packets = list_packet_messages(messages)
-    if not packets:
-        return
-
-    st.markdown("### ./packet_viewer")
-    st.caption("Mode hemat performa: chat hanya memuat metadata + thumbnail kecil. File asli didekripsi saat packet dipilih.")
-
-    indexed_packets = {str(msg.get("id", idx)): msg for idx, msg in enumerate(packets)}
-    packet_ids = ["-- pilih packet --"] + list(reversed(list(indexed_packets.keys())))
-    selected_id = st.selectbox(
-        "open_packet:",
-        options=packet_ids,
-        format_func=lambda item: item if item == "-- pilih packet --" else packet_label(indexed_packets[item]),
-        key=f"packet_viewer_select::{room}",
-    )
-    if selected_id == "-- pilih packet --":
-        return
-
-    selected_msg = indexed_packets[selected_id]
-    if st.button("DECRYPT / OPEN SELECTED PACKET", key=f"open_packet_button::{room}"):
-        st.session_state[f"opened_packet::{room}"] = selected_id
-
-    opened_id = st.session_state.get(f"opened_packet::{room}")
-    if opened_id != selected_id:
-        st.info("packet_selected=true | klik DECRYPT / OPEN untuk memuat file asli")
-        return
-
-    data = read_encrypted_packet(str(selected_msg.get("packet_path", "")))
-    if data is None:
-        st.error("packet_error=missing_or_decrypt_failed")
-        return
-
-    msg_type = str(selected_msg.get("type", ""))
-    mime_type = str(selected_msg.get("mime_type", "application/octet-stream"))
-    filename = str(selected_msg.get("filename", "packet.bin"))
-
-    if msg_type == "image":
-        st.image(data, caption=f"IMAGE_PACKET :: {filename}", width=360)
-    elif msg_type == "audio":
-        st.audio(data, format=mime_type)
-    elif msg_type == "document":
-        st.info(f"DOCUMENT_PACKET siap di-download: {filename}")
-
-    st.download_button(
-        label=f"DOWNLOAD {msg_type.upper()} PACKET",
-        data=data,
-        file_name=filename,
-        mime=mime_type,
-        key=f"download_packet::{room}::{selected_id}",
-    )
-
-# ==============================
-# SOUND NOTIFICATION
-# ==============================
-def latest_foreign_message_signature(messages: list[dict[str, Any]], username: str) -> str:
+def latest_foreign_signature(messages: list[dict[str, Any]], username: str) -> str:
     for msg in reversed(messages):
         if str(msg.get("username", "")) != username:
-            return str(msg.get("id") or f"{msg.get('created_at', '')}:{msg.get('time', '')}:{msg.get('username', '')}")
+            return str(msg.get("id", ""))
     return ""
 
 
-@st.cache_data(show_spinner=False)
-def hacker_beep_wav_bytes() -> bytes:
-    sample_rate = 44100
-    duration = 0.18
-    total_samples = int(sample_rate * duration)
-    samples: list[int] = []
-    for i in range(total_samples):
-        t = i / sample_rate
-        envelope = min(1.0, t / 0.01) * max(0.0, 1.0 - (t / duration)) ** 2.6
-        value = math.sin(2 * math.pi * 1568.0 * t) * 0.55 * envelope
-        value += math.sin(2 * math.pi * 2093.0 * t) * 0.18 * envelope
-        if t < 0.015:
-            value += math.sin(2 * math.pi * 3136.0 * t) * 0.12 * (1.0 - t / 0.015)
-        value = max(-1.0, min(1.0, value))
-        samples.append(int(value * 32767))
-    buffer = io.BytesIO()
-    with wave.open(buffer, "wb") as wav_file:
-        wav_file.setnchannels(1)
-        wav_file.setsampwidth(2)
-        wav_file.setframerate(sample_rate)
-        wav_file.writeframes(b"".join(struct.pack("<h", sample) for sample in samples))
-    return buffer.getvalue()
-
-
-def hacker_beep_data_uri() -> str:
-    return "data:audio/wav;base64," + base64.b64encode(hacker_beep_wav_bytes()).decode("ascii")
-
-
-def render_sound_controller(trigger_id: str, enabled: bool) -> None:
-    if not enabled:
+def render_sound_notice(signature: str, enabled: bool) -> None:
+    if not enabled or not signature:
         return
-    trigger_safe = html.escape(trigger_id, quote=True)
-    audio_uri = hacker_beep_data_uri()
+    safe_sig = html.escape(signature, quote=True)
     components.html(
         f"""
-        <div style="font-family: monospace; color:#00ff66; background:#000; border:1px solid #00ff66; padding:6px; font-size:12px;">
-          <button id="enable-sound" style="background:#000;color:#00ff66;border:1px solid #00ff66;font-family:monospace;">ENABLE DING</button>
-          <span id="sound-state"> sound=browser_locked_until_enabled</span>
-        </div>
+        <button id="enable" style="border:1px solid #e6e9f0;border-radius:999px;padding:8px 12px;background:white;cursor:pointer">Aktifkan suara notifikasi</button>
         <script>
-          const KEY = 'antitrust_sound_enabled';
-          const trigger = "{trigger_safe}";
-          const audioUri = "{audio_uri}";
-          const btn = document.getElementById('enable-sound');
-          const state = document.getElementById('sound-state');
-          function setState(text) {{ if (state) state.textContent = ' ' + text; }}
-          function ding() {{
-            try {{
-              const audio = new Audio(audioUri);
-              audio.volume = 0.65;
-              audio.play().then(() => setState('sound=armed')).catch(() => setState('sound=blocked_click_enable'));
-            }} catch(e) {{ setState('sound=error'); }}
-          }}
-          if (btn) {{
-            btn.onclick = () => {{ localStorage.setItem(KEY, '1'); ding(); }};
-          }}
-          const last = localStorage.getItem('antitrust_last_trigger') || '';
-          if (localStorage.getItem(KEY) === '1') {{
-            setState('sound=armed');
-            if (trigger && trigger !== last) {{ ding(); }}
-          }}
-          if (trigger) localStorage.setItem('antitrust_last_trigger', trigger);
+        const key='antitrust-last-sound';
+        const sig='{safe_sig}';
+        function beep(){{
+          const ctx=new(window.AudioContext||window.webkitAudioContext)();
+          const osc=ctx.createOscillator(); const gain=ctx.createGain();
+          osc.frequency.value=880; gain.gain.value=0.05;
+          osc.connect(gain); gain.connect(ctx.destination); osc.start();
+          setTimeout(()=>{{osc.stop();ctx.close();}},120);
+        }}
+        document.getElementById('enable').onclick=()=>{{localStorage.setItem('antitrust-sound','1');beep();}};
+        if(localStorage.getItem('antitrust-sound')==='1' && localStorage.getItem(key)!==sig){{beep();localStorage.setItem(key,sig);}}
         </script>
         """,
-        height=44,
+        height=45,
     )
 
-# ==============================
-# UI HELPERS
-# ==============================
-def reset_media_packet(key_prefix: str) -> None:
-    counter_key = f"{key_prefix}_counter"
-    st.session_state[counter_key] = int(st.session_state.get(counter_key, 0)) + 1
+
+def render_packet_viewer(room: str, messages: list[dict[str, Any]]) -> None:
+    packets = [msg for msg in messages if str(msg.get("type", "")) in {"image", "audio", "document"}]
+    if not packets:
+        return
+    with st.container(border=True):
+        st.subheader("Packet Viewer")
+        packet_map = {str(msg.get("id")): msg for msg in packets}
+        selected = st.selectbox(
+            "Pilih file terenkripsi",
+            options=list(reversed(list(packet_map.keys()))),
+            format_func=lambda mid: f"{packet_map[mid].get('type','packet')} · {packet_map[mid].get('filename','packet')} · {format_bytes(packet_map[mid].get('size_bytes',0))}",
+        )
+        msg = packet_map[selected]
+        if st.button("Buka packet", use_container_width=True):
+            st.session_state[f"opened::{room}"] = selected
+        if st.session_state.get(f"opened::{room}") != selected:
+            st.caption("File asli baru didekripsi setelah tombol dibuka.")
+            return
+        data = read_packet(str(msg.get("packet_path", "")))
+        if data is None:
+            st.error("Packet tidak ditemukan atau gagal didekripsi.")
+            return
+        mime = str(msg.get("mime_type", "application/octet-stream"))
+        filename = safe_filename(str(msg.get("filename", "packet.bin")))
+        if msg.get("type") == "image":
+            st.image(data, caption=filename, width=420)
+        elif msg.get("type") == "audio":
+            st.audio(data, format=mime)
+        st.download_button("Download packet", data=data, file_name=filename, mime=mime, use_container_width=True)
 
 
-def uploader_key(key_prefix: str) -> str:
-    return f"{key_prefix}_{st.session_state.get(f'{key_prefix}_counter', 0)}"
+def render_admin_panel() -> None:
+    admin_password = get_secret("CHAT_ADMIN_PASSWORD", "")
+    with st.container(border=True):
+        st.subheader("Admin")
+        if not admin_password:
+            st.error("Set CHAT_ADMIN_PASSWORD di Streamlit Secrets atau environment variable dulu.")
+            st.code('CHAT_ADMIN_PASSWORD = "password-yang-kuat"\nFERNET_KEY = "hasil-generate-fernet-key"\nPUBLIC_APP_URL = "https://nama-app.streamlit.app"')
+            return
+        if not st.session_state.get("admin_ok"):
+            password = st.text_input("Password admin", type="password")
+            if st.button("Login admin", use_container_width=True):
+                if hmac.compare_digest(password, admin_password):
+                    st.session_state["admin_ok"] = True
+                    st.rerun()
+                else:
+                    st.error("Password salah.")
+            return
+
+        st.success("Admin aktif")
+        room = st.text_input("Nama room tujuan", placeholder="kelas-private-01")
+        ttl = st.number_input("Masa aktif invite link (jam)", min_value=1, max_value=168, value=24)
+        if st.button("Buat invite link", use_container_width=True):
+            if not room.strip():
+                st.warning("Nama room tidak boleh kosong.")
+            else:
+                token = create_invite(room.strip(), int(ttl))
+                st.session_state["last_invite"] = build_invite_url(token)
+                st.success("Invite link berhasil dibuat.")
+        if st.session_state.get("last_invite"):
+            st.text_input("Invite link", value=st.session_state["last_invite"])
+        if st.button("Logout admin", use_container_width=True):
+            st.session_state.pop("admin_ok", None)
+            st.rerun()
+
+
+def render_landing() -> None:
+    st.markdown('<div class="hero"><span class="badge">🔐 invite only</span><span class="badge">encrypted packets</span><h1>AntiTrust</h1><p class="muted">Private chat sederhana dengan room berbasis invite, enkripsi Fernet, validasi upload, dan auto-destroy saat room tidak aktif.</p></div>', unsafe_allow_html=True)
+    st.info("Masuk memakai invite link. Admin dapat membuat invite link dari panel di bawah.")
+    render_admin_panel()
 
 
 def render_sidebar() -> tuple[bool, int, bool]:
-    st.sidebar.title("./control")
-    auto_refresh_enabled = st.sidebar.toggle("auto_refresh", value=True)
-    refresh_seconds = st.sidebar.selectbox("refresh_interval:", options=[2, 3, 5, 10, 15], index=2)
-    sound_enabled = st.sidebar.toggle("ding_on_new_message", value=True)
-    st.sidebar.caption(f"public_url={get_secret('PUBLIC_APP_URL', PUBLIC_APP_URL)}")
-    return auto_refresh_enabled, refresh_seconds, sound_enabled
+    st.sidebar.title("AntiTrust")
+    auto_refresh = st.sidebar.toggle("Auto refresh", value=True)
+    interval = st.sidebar.selectbox("Interval", [3, 5, 10, 15], index=1)
+    sound = st.sidebar.toggle("Suara pesan baru", value=True)
+    st.sidebar.caption("Key dan password harus disimpan di Secrets/env, bukan di GitHub.")
+    return auto_refresh, interval, sound
 
 
 def render_room_settings(room: str) -> None:
     config = get_room_config(room)
-    current_choice = choice_from_minutes(config.get("auto_destroy_minutes"))
-    try:
-        current_index = AUTO_DESTROY_CHOICES.index(current_choice)
-    except ValueError:
-        current_index = AUTO_DESTROY_CHOICES.index("30 menit")
-
-    with st.expander("room_destroy_settings", expanded=False):
-        choice = st.selectbox(
-            "auto_destroy_if_room_empty:",
-            AUTO_DESTROY_CHOICES,
-            index=current_index,
-            help="Pesan room otomatis dihancurkan jika tidak ada user aktif selama durasi ini. Default 30 menit.",
-        )
-        if st.button("SAVE DESTROY SETTING", use_container_width=True):
-            set_room_destroy_choice(room, choice)
-            st.success(f"destroy_setting=saved | value={choice}")
+    current = choice_from_minutes(config.get("auto_destroy_minutes"))
+    with st.expander("Pengaturan room"):
+        choice = st.selectbox("Auto-destroy jika room kosong", AUTO_DESTROY_CHOICES, index=AUTO_DESTROY_CHOICES.index(current) if current in AUTO_DESTROY_CHOICES else 3)
+        if st.button("Simpan pengaturan", use_container_width=True):
+            config["auto_destroy_minutes"] = parse_destroy_choice(choice)
+            save_room_config(room, config)
+            st.success("Pengaturan disimpan.")
 
 
 def render_panic(room: str) -> None:
-    st.markdown(
-        """
-        <div class="panic-panel">
-          <div class="panic-title">PANIC BUTTON // DESTROY ROOM MESSAGES</div>
-          <p class="panic-copy">Tekan tombol ini untuk menghancurkan semua pesan dan packet di room aktif.</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    if st.button("PANIC DESTROY NOW", type="primary", use_container_width=True):
-        deleted_count = panic_clear_messages(room)
-        st.success(f"room_destroyed=true | deleted_messages={deleted_count}")
+    st.markdown('<div class="danger-box"><b>Panic Destroy</b><br><span class="muted">Menghapus semua pesan dan packet di room aktif.</span></div>', unsafe_allow_html=True)
+    confirm = st.checkbox("Saya paham tindakan ini menghapus pesan room aktif")
+    if st.button("Panic destroy sekarang", type="primary", use_container_width=True, disabled=not confirm):
+        count = panic_destroy(room)
+        st.success(f"Berhasil menghapus {count} pesan/packet.")
         st.rerun()
 
 
-def render_message_input(room: str, username: str) -> None:
-    st.markdown("### ./send_packet")
-    with st.form(key=f"text_form::{room}::{username}", clear_on_submit=True):
-        message_text = st.text_area("message:", placeholder="ketik pesan terenkripsi...", height=82)
-        send_text = st.form_submit_button("SEND TEXT PACKET", use_container_width=True)
-        if send_text:
-            clean_text = message_text.strip()
-            if clean_text:
-                append_text_message(room, username, clean_text)
-                st.rerun()
-            else:
-                st.warning("message=empty")
+def render_message_form(room: str, username: str) -> None:
+    with st.container(border=True):
+        st.subheader("Kirim pesan")
+        with st.form("text-message", clear_on_submit=True):
+            message = st.text_area("Pesan", placeholder="Tulis pesan terenkripsi...", height=90, max_chars=MAX_TEXT_LENGTH)
+            submitted = st.form_submit_button("Kirim pesan", use_container_width=True)
+            if submitted:
+                if not rate_limited("text"):
+                    append_text(room, username, message)
+                    st.rerun()
+        tab_img, tab_voice, tab_doc = st.tabs(["Image", "Voice", "Document"])
+        with tab_img:
+            image = st.file_uploader("Image", type=list(ALLOWED_IMAGE_TYPES))
+            if st.button("Kirim image", use_container_width=True):
+                if not rate_limited("image"):
+                    payload = validate_upload(image, "image")
+                    if payload:
+                        append_media(room, username, "image", *payload)
+                        st.rerun()
+        with tab_voice:
+            audio = st.file_uploader("Audio", type=list(ALLOWED_AUDIO_TYPES))
+            recorded = st.audio_input("Rekam suara") if hasattr(st, "audio_input") else None
+            if st.button("Kirim voice", use_container_width=True):
+                if not rate_limited("audio"):
+                    payload = validate_upload(recorded or audio, "audio")
+                    if payload:
+                        append_media(room, username, "audio", *payload)
+                        st.rerun()
+        with tab_doc:
+            doc = st.file_uploader("Document", type=list(ALLOWED_DOCUMENT_TYPES))
+            if st.button("Kirim document", use_container_width=True):
+                if not rate_limited("document"):
+                    payload = validate_upload(doc, "document")
+                    if payload:
+                        append_media(room, username, "document", *payload)
+                        st.rerun()
 
-    packet_tab, voice_tab, document_tab = st.tabs(["image_packet", "voice_packet", "document_packet"])
 
-    with packet_tab:
-        image_file = st.file_uploader(
-            "image_packet:",
-            type=ALLOWED_IMAGE_TYPES,
-            key=uploader_key("image_packet"),
-        )
-        if st.button("SEND IMAGE PACKET", use_container_width=True, key=f"send_image::{room}"):
-            payload = validate_media_file(image_file, "image", room)
-            if payload:
-                data, mime_type, filename = payload
-                append_media_message(room, username, "image", data, mime_type, filename)
-                reset_media_packet("image_packet")
-                st.success("image_packet=sent | input=cleared")
-                st.rerun()
-
-    with voice_tab:
-        voice_file = st.file_uploader(
-            "voice_packet_file:",
-            type=ALLOWED_AUDIO_TYPES,
-            key=uploader_key("voice_packet"),
-        )
-        recorded_voice = None
-        if hasattr(st, "audio_input"):
-            recorded_voice = st.audio_input("record_voice:", key=uploader_key("record_voice_packet"))
-        if st.button("SEND VOICE PACKET", use_container_width=True, key=f"send_voice::{room}"):
-            candidate = recorded_voice or voice_file
-            payload = validate_media_file(candidate, "audio", room)
-            if payload:
-                data, mime_type, filename = payload
-                append_media_message(room, username, "audio", data, mime_type, filename)
-                reset_media_packet("voice_packet")
-                reset_media_packet("record_voice_packet")
-                st.success("voice_packet=sent | input=cleared")
-                st.rerun()
-
-    with document_tab:
-        doc_file = st.file_uploader(
-            "document_packet:",
-            type=ALLOWED_DOCUMENT_TYPES,
-            key=uploader_key("document_packet"),
-        )
-        if st.button("SEND DOCUMENT PACKET", use_container_width=True, key=f"send_document::{room}"):
-            payload = validate_document_file(doc_file)
-            if payload:
-                data, mime_type, filename = payload
-                append_media_message(room, username, "document", data, mime_type, filename)
-                reset_media_packet("document_packet")
-                st.success("document_packet=sent | input=cleared")
-                st.rerun()
-
-# ==============================
-# APP FLOW
-# ==============================
 def main() -> None:
+    ensure_dirs()
     st.set_page_config(page_title=APP_TITLE, page_icon=APP_ICON, layout="centered")
-    st.markdown(f"<style>{CSS}</style>", unsafe_allow_html=True)
-
-    destroyed_rooms = purge_inactive_rooms()
-
-    st.title(APP_TITLE)
-    st.markdown(
-        """
-        <div class="terminal-bar">
-          <p class="terminal-line">./encrypted/private-room/chat && ./public/channel --disabled && ./invite_link/locked-room --mode <span class="cursor-blink"></span></p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    if destroyed_rooms:
-        st.warning("auto_destroy_completed=" + ",".join(destroyed_rooms))
-
-    auto_refresh_enabled, refresh_seconds, sound_enabled = render_sidebar()
-
-    if auto_refresh_enabled and st_autorefresh is not None:
-        st_autorefresh(interval=refresh_seconds * 1000, key="antitrust_autorefresh")
+    st.markdown(CSS, unsafe_allow_html=True)
+    destroyed = purge_inactive_rooms()
+    auto_refresh, interval, sound = render_sidebar()
+    if auto_refresh and st_autorefresh is not None:
+        st_autorefresh(interval=interval * 1000, key="antitrust_refresh")
+    if destroyed:
+        st.toast(f"{destroyed} room tidak aktif sudah dibersihkan.")
 
     invite_token = get_query_param("invite")
-    invite_room = resolve_room_from_token(invite_token) if invite_token else None
-
-    if not invite_token:
-        render_locked_landing()
-        st.stop()
-
-    if not invite_room:
-        st.error("invite_link=invalid_or_revoked")
-        render_locked_landing()
-        st.stop()
-
-    room = invite_room.strip()
-    st.markdown(
-        f'<div class="compact-panel"><p class="terminal-line">invite_link=active | room=locked | room={html.escape(room)}</p></div>',
-        unsafe_allow_html=True,
-    )
-    username = st.text_input("user:", placeholder="zero_cool")
-    username = username.strip() if isinstance(username, str) else ""
-
-    if not username:
-        st.info("Isi user untuk masuk ke terminal chat private.")
+    room = resolve_invite(invite_token)
+    if not room:
+        render_landing()
         return
 
-    active_users = update_online_status(room, username)
+    st.markdown('<div class="hero"><span class="badge">🔐 room aktif</span><span class="badge">private invite</span><h1>AntiTrust Room</h1><p class="muted">Pesan teks dan packet disimpan terenkripsi. File asli hanya didekripsi saat dibuka.</p></div>', unsafe_allow_html=True)
+    username = st.text_input("Nama pengguna", placeholder="contoh: adiora")
+    username = username.strip()[:40]
+    if not username:
+        st.info("Isi nama pengguna untuk masuk ke room.")
+        return
 
-    st.markdown("---")
+    active_users = update_online(room, username)
+    messages = load_messages(room)
     config = get_room_config(room)
-    destroy_label = choice_from_minutes(config.get("auto_destroy_minutes"))
-    st.caption(f"room={room} | user={username} | active_peers={len(active_users)} | auto_destroy={destroy_label}")
-
+    st.caption(f"User: {username} · Peers aktif: {len(active_users)} · Auto-destroy: {choice_from_minutes(config.get('auto_destroy_minutes'))}")
     render_room_settings(room)
     render_panic(room)
-
-    rooms = load_json(CHAT_FILE)
-    messages = rooms.get(room, []) if isinstance(rooms.get(room, []), list) else []
-
-    trigger_id = latest_foreign_message_signature(messages, username)
-    render_sound_controller(trigger_id, sound_enabled)
-
-    components.html(render_chat_box(messages, username), height=480, scrolling=False)
+    render_sound_notice(latest_foreign_signature(messages, username), sound)
+    components.html(render_chat(messages, username), height=500, scrolling=False)
     render_packet_viewer(room, messages)
-    render_message_input(room, username)
+    render_message_form(room, username)
 
 
 if __name__ == "__main__":
