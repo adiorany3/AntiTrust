@@ -70,39 +70,106 @@ SHELL_KEYWORDS = [b"curl ", b"wget ", b"chmod ", b"rm -rf", b"powershell", b"Inv
 CSS = """
 <style>
 :root{
-  --bg:#f7f8fb;--card:#ffffff;--text:#172033;--muted:#697386;--line:#e6e9f0;
-  --primary:#2563eb;--primary-soft:#eff6ff;--danger:#dc2626;--ok:#16a34a;
+  color-scheme: light;
+  --app-bg:#f7f8fb;
+  --app-bg-2:#eef3ff;
+  --surface:#ffffff;
+  --surface-2:#f8fafc;
+  --surface-soft:rgba(255,255,255,.94);
+  --text:#172033;
+  --text-strong:#0f172a;
+  --muted:#4b5563;
+  --line:#d9dee8;
+  --input-bg:#ffffff;
+  --primary:#2563eb;
+  --primary-soft:#eff6ff;
+  --danger:#dc2626;
+  --danger-soft:#fff1f2;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    color-scheme: dark;
+    --app-bg:#0b1020;
+    --app-bg-2:#111827;
+    --surface:#141b2d;
+    --surface-2:#1f2937;
+    --surface-soft:rgba(20,27,45,.96);
+    --text:#f8fafc;
+    --text-strong:#ffffff;
+    --muted:#cbd5e1;
+    --line:#334155;
+    --input-bg:#0f172a;
+    --primary:#60a5fa;
+    --primary-soft:#172554;
+    --danger:#fb7185;
+    --danger-soft:#3f111b;
+  }
 }
 #MainMenu, header, footer {visibility:hidden;}
-.stApp{background:linear-gradient(180deg,#f7f8fb 0%,#eef3ff 100%);color:var(--text);}
+.stApp{background:linear-gradient(180deg,var(--app-bg) 0%,var(--app-bg-2) 100%)!important;color:var(--text)!important;}
 .block-container{max-width:920px;padding:1.4rem 1rem 2.4rem;}
-h1,h2,h3{color:var(--text)!important;letter-spacing:-.02em;}
+html,body,.stApp,.stMarkdown,p,span,label,div,[data-testid="stWidgetLabel"],[data-testid="stMarkdownContainer"]{color:var(--text)!important;}
+h1,h2,h3,h4,h5,h6{color:var(--text-strong)!important;letter-spacing:-.02em;}
 h1{font-size:2rem!important;margin-bottom:.15rem!important;}
-[data-testid="stSidebar"]{background:#fff;border-right:1px solid var(--line);}
-.stButton button,.stFormSubmitButton button{border-radius:14px!important;border:1px solid var(--line)!important;box-shadow:0 4px 14px rgba(23,32,51,.06)!important;}
-.stButton button[kind="primary"]{background:var(--danger)!important;color:#fff!important;border-color:var(--danger)!important;}
-.stTextInput input,.stTextArea textarea,.stSelectbox div[data-baseweb="select"]>div{border-radius:14px!important;border:1px solid var(--line)!important;background:#fff!important;}
-.card{background:rgba(255,255,255,.92);border:1px solid var(--line);border-radius:24px;padding:18px 20px;box-shadow:0 10px 30px rgba(23,32,51,.07);margin:14px 0;}
-.hero{background:linear-gradient(135deg,#ffffff 0%,#eef6ff 100%);border:1px solid var(--line);border-radius:28px;padding:24px;box-shadow:0 16px 40px rgba(37,99,235,.10);margin-bottom:18px;}
-.badge{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;background:var(--primary-soft);color:var(--primary);font-size:.82rem;font-weight:700;margin-right:8px;}
-.muted{color:var(--muted);font-size:.94rem;line-height:1.55;}
-.danger-box{background:#fff1f2;border:1px solid #fecdd3;border-radius:20px;padding:14px 16px;margin:12px 0;}
+a{color:var(--primary)!important;}
+[data-testid="stSidebar"]{background:var(--surface)!important;border-right:1px solid var(--line)!important;}
+[data-testid="stSidebar"] *{color:var(--text)!important;}
+.stButton button,.stFormSubmitButton button,.stDownloadButton button{border-radius:14px!important;border:1px solid var(--line)!important;background:var(--surface-2)!important;color:var(--text-strong)!important;box-shadow:0 4px 14px rgba(0,0,0,.10)!important;}
+.stButton button:hover,.stFormSubmitButton button:hover,.stDownloadButton button:hover{border-color:var(--primary)!important;color:var(--text-strong)!important;}
+.stButton button[kind="primary"],.stFormSubmitButton button[kind="primary"]{background:var(--danger)!important;color:#ffffff!important;border-color:var(--danger)!important;}
+.stTextInput input,.stTextArea textarea,.stNumberInput input,.stSelectbox div[data-baseweb="select"]>div{border-radius:14px!important;border:1px solid var(--line)!important;background:var(--input-bg)!important;color:var(--text-strong)!important;}
+.stTextInput input::placeholder,.stTextArea textarea::placeholder{color:var(--muted)!important;opacity:1!important;}
+.stSelectbox [data-baseweb="select"] span{color:var(--text-strong)!important;}
+.stTabs [data-baseweb="tab"]{color:var(--muted)!important;}
+.stTabs [aria-selected="true"]{color:var(--primary)!important;}
+.stCaption,.stCaption *,.stInfo,.stAlert,.stToast{color:var(--text)!important;}
+.card{background:var(--surface-soft);border:1px solid var(--line);border-radius:24px;padding:18px 20px;box-shadow:0 10px 30px rgba(0,0,0,.14);margin:14px 0;color:var(--text)!important;}
+.hero{background:linear-gradient(135deg,var(--surface) 0%,var(--surface-2) 100%);border:1px solid var(--line);border-radius:28px;padding:24px;box-shadow:0 16px 40px rgba(37,99,235,.12);margin-bottom:18px;color:var(--text)!important;}
+.badge{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;background:var(--primary-soft);color:var(--primary)!important;font-size:.82rem;font-weight:700;margin-right:8px;}
+.muted{color:var(--muted)!important;font-size:.94rem;line-height:1.55;}
+.danger-box{background:var(--danger-soft);border:1px solid var(--danger);border-radius:20px;padding:14px 16px;margin:12px 0;color:var(--text)!important;}
 </style>
 """
 
 CHAT_CSS = """
 <style>
-html,body{margin:0;background:transparent;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;color:#172033;}
-.chat{height:470px;overflow-y:auto;padding:14px;background:rgba(255,255,255,.86);border:1px solid #e6e9f0;border-radius:24px;box-sizing:border-box;}
+:root{
+  color-scheme: light;
+  --chat-bg:rgba(255,255,255,.90);
+  --bubble:#f2f5fb;
+  --bubble-text:#172033;
+  --me:#2563eb;
+  --me-text:#ffffff;
+  --muted:#4b5563;
+  --line:#d9dee8;
+  --empty:#4b5563;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    color-scheme: dark;
+    --chat-bg:rgba(15,23,42,.92);
+    --bubble:#1f2937;
+    --bubble-text:#f8fafc;
+    --me:#2563eb;
+    --me-text:#ffffff;
+    --muted:#cbd5e1;
+    --line:#334155;
+    --empty:#cbd5e1;
+  }
+}
+html,body{margin:0;background:transparent;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;color:var(--bubble-text);}
+.chat{height:470px;overflow-y:auto;padding:14px;background:var(--chat-bg);border:1px solid var(--line);border-radius:24px;box-sizing:border-box;}
 .row{display:flex;margin:0 0 10px 0;}
 .row.me{justify-content:flex-end;}
-.bubble{max-width:76%;padding:11px 13px;border-radius:18px;background:#f2f5fb;border:1px solid #e6e9f0;overflow-wrap:anywhere;line-height:1.42;}
-.row.me .bubble{background:#2563eb;color:#fff;border-color:#2563eb;}
-.meta{font-size:11px;color:#697386;margin-top:6px;}
-.row.me .meta{color:rgba(255,255,255,.72);}
-.empty{height:100%;display:flex;align-items:center;justify-content:center;color:#697386;}
-.packet{display:block;font-weight:700;margin-bottom:4px;}
-.thumb{max-width:min(260px,100%);max-height:190px;border-radius:14px;border:1px solid rgba(255,255,255,.35);object-fit:contain;display:block;margin-top:8px;background:#fff;}
+.bubble{max-width:76%;padding:11px 13px;border-radius:18px;background:var(--bubble);color:var(--bubble-text);border:1px solid var(--line);overflow-wrap:anywhere;line-height:1.42;}
+.bubble small{color:var(--muted);}
+.row.me .bubble{background:var(--me);color:var(--me-text);border-color:var(--me);}
+.row.me .bubble small{color:rgba(255,255,255,.86);}
+.meta{font-size:11px;color:var(--muted);margin-top:6px;}
+.row.me .meta{color:rgba(255,255,255,.78);}
+.empty{height:100%;display:flex;align-items:center;justify-content:center;color:var(--empty);}
+.packet{display:block;font-weight:700;margin-bottom:4px;color:inherit;}
+.thumb{max-width:min(260px,100%);max-height:190px;border-radius:14px;border:1px solid var(--line);object-fit:contain;display:block;margin-top:8px;background:#fff;}
 </style>
 """
 
@@ -627,7 +694,7 @@ def render_sound_notice(signature: str, enabled: bool) -> None:
     safe_sig = html.escape(signature, quote=True)
     components.html(
         f"""
-        <button id="enable" style="border:1px solid #e6e9f0;border-radius:999px;padding:8px 12px;background:white;cursor:pointer">Aktifkan suara notifikasi</button>
+        <button id="enable" style="border:1px solid var(--line,#d9dee8);border-radius:999px;padding:8px 12px;background:var(--surface,#fff);color:var(--text,#172033);cursor:pointer">Aktifkan suara notifikasi</button>
         <script>
         const key='antitrust-last-sound';
         const sig='{safe_sig}';
