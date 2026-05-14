@@ -116,3 +116,11 @@ PY
 - Input pesan text diganti menjadi satu baris agar tombol Enter langsung mengirim pesan.
 - Placeholder diperbarui menjadi `Tulis pesan lalu tekan Enter...`.
 - Pesan kosong/spasi tidak akan dikirim.
+
+
+## Update v17.8
+
+- Menambahkan fitur **Ping room**.
+- Ping tampil sebagai bubble khusus di chat.
+- Ping ikut memicu suara pesan masuk untuk user lain, jika suara sudah diaktifkan di browser.
+- Ping memakai rate limit agar tidak mudah spam.

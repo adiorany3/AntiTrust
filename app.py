@@ -391,7 +391,8 @@ html,body{margin:0;background:transparent;font-family:Inter,system-ui,-apple-sys
 .packet{display:block;font-weight:800;margin-bottom:4px;color:inherit;}
 .thumb{max-width:min(220px,100%);max-height:150px;border-radius:18px;border:1px solid var(--line);object-fit:contain;display:block;margin-top:8px;background:rgba(255,255,255,.55);box-shadow:0 12px 30px rgba(0,0,0,.12);}
 
-.pin,.secret,.poll,.checklist,.location{display:block;font-weight:800;margin-bottom:4px;color:inherit;}
+.pin,.secret,.poll,.checklist,.location,.ping{display:block;font-weight:800;margin-bottom:4px;color:inherit;}
+.ping-card{font-weight:800;letter-spacing:.01em;}
 .reactions{margin-top:6px;font-size:12px;opacity:.92;}
 .expire{font-size:10px;opacity:.75;margin-top:3px;}
 .pinned-card{border:1px solid var(--line);border-radius:16px;padding:8px 10px;margin:0 0 9px 0;background:rgba(250,204,21,.16);color:var(--bubble-text);}
@@ -1040,6 +1041,11 @@ def append_special_message(room: str, username: str, msg_type: str, payload: dic
     mark_room_active(room)
 
 
+def append_ping(room: str, username: str) -> None:
+    """Send a lightweight attention ping into the room."""
+    append_special_message(room, username, "ping", {})
+
+
 def message_summary(msg: dict[str, Any]) -> str:
     msg_type = str(msg.get("type", "text"))
     sender = normalize_display_name(str(msg.get("username", "unknown")))
@@ -1053,6 +1059,8 @@ def message_summary(msg: dict[str, Any]) -> str:
         body = decrypt_text(str(msg.get("title", "Checklist")))[:42]
     elif msg_type == "location":
         body = decrypt_text(str(msg.get("label", "Location")))[:42]
+    elif msg_type == "ping":
+        body = "PING"
     else:
         body = str(msg.get("filename", msg_type))[:42]
     return f"{sender} · {msg_type} · {body}"
@@ -1533,6 +1541,8 @@ def render_chat(messages: list[dict[str, Any]], username: str) -> str:
             checked = msg.get("checked") if isinstance(msg.get("checked"), dict) else {}
             done = sum(1 for i in range(len(items)) if checked.get(str(i)))
             content = f'<span class="checklist">☑️ Checklist</span>{title}<br><small>{done}/{len(items)} selesai · kelola lewat panel Fitur</small>'
+        elif msg_type == "ping":
+            content = '<span class="ping">📡 Ping</span><span class="ping-card">Butuh perhatian sekarang</span><br><small>Ping dikirim ke room.</small>'
         else:
             filename = html.escape(str(msg.get("filename", "packet")))
             size = html.escape(format_bytes(msg.get("size_bytes", 0)))
@@ -2017,7 +2027,7 @@ def render_message_form(room: str, username: str) -> None:
         st.markdown("**Kirim**")
         ttl_label = st.selectbox("Self-destruct pesan", list(MESSAGE_SELF_DESTRUCT_CHOICES.keys()), index=0, key="message_ttl")
         ttl_seconds = int(MESSAGE_SELF_DESTRUCT_CHOICES.get(ttl_label, 0))
-        tab_text, tab_special, tab_img, tab_voice, tab_doc = st.tabs(["Text", "Secret", "Image", "Voice", "Doc"])
+        tab_text, tab_ping, tab_special, tab_img, tab_voice, tab_doc = st.tabs(["Text", "Ping", "Secret", "Image", "Voice", "Doc"])
         with tab_text:
             with st.form("text-message", clear_on_submit=True):
                 message = st.text_input(
@@ -2032,6 +2042,13 @@ def render_message_form(room: str, username: str) -> None:
                     if clean_message and not rate_limited("text"):
                         append_text(room, username, clean_message, ttl_seconds)
                         st.rerun()
+        with tab_ping:
+            st.caption("Kirim ping cepat untuk menarik perhatian user lain di room.")
+            if st.button("📡 Ping room", use_container_width=True, key="send_ping_btn"):
+                if not rate_limited("ping"):
+                    append_ping(room, username)
+                    st.toast("Ping terkirim.", icon="📡")
+                    st.rerun()
         with tab_special:
             kind = st.selectbox("Jenis", ["Secret Note", "One-Time Message", "Poll Cepat", "Location Pin", "Checklist Bersama"], key="special_kind")
             if kind in {"Secret Note", "One-Time Message"}:
