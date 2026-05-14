@@ -963,16 +963,19 @@ def room_creator_is_unlocked(room: str) -> bool:
     return bool(st.session_state.get("admin_ok")) or bool(st.session_state.get(room_creator_session_key(room)))
 
 
-def render_room_creator_unlock(room: str) -> bool:
-    """Minta password pembuat sebelum aksi sensitif seperti revoke/hapus chat."""
+def render_room_creator_unlock(room: str, context_key: str = "default") -> bool:
+    """Minta password pembuat sebelum aksi sensitif seperti revoke/hapus chat.
+    context_key membuat key Streamlit unik saat form muncul di beberapa menu.
+    """
     if room_creator_is_unlocked(room):
         return True
     if not room_has_creator_password(room):
         st.warning("Aksi ini hanya tersedia untuk admin karena room lama ini belum punya password pembuat.")
         return False
     st.info("Masukkan password pembuat room untuk revoke room atau hapus chat.")
-    password = st.text_input("Password pembuat room", type="password", key=f"creator_password_unlock::{room_key(room)}")
-    if st.button("Unlock aksi pembuat", use_container_width=True, key=f"creator_unlock_btn::{room_key(room)}"):
+    safe_context = hashlib.sha1(str(context_key).encode("utf-8")).hexdigest()[:10]
+    password = st.text_input("Password pembuat room", type="password", key=f"creator_password_unlock::{safe_context}::{room_key(room)}")
+    if st.button("Unlock aksi pembuat", use_container_width=True, key=f"creator_unlock_btn::{safe_context}::{room_key(room)}"):
         if verify_room_creator_password(room, password):
             st.session_state[room_creator_session_key(room)] = True
             st.success("Akses pembuat aktif.")
@@ -2213,7 +2216,7 @@ def render_room_actions(room: str, username: str) -> None:
     with st.expander("Aksi", expanded=False):
         st.caption("Keluar room dinonaktifkan agar identitas tidak bisa direset.")
 
-        if not render_room_creator_unlock(room):
+        if not render_room_creator_unlock(room, "revoke_room_actions"):
             return
 
         pending_room = st.session_state.get("destroy_pending_room")
@@ -2266,7 +2269,7 @@ def render_room_settings(room: str) -> None:
 
 def render_panic(room: str) -> None:
     st.markdown('<div class="danger-box"><b>Hapus Chat</b> <span class="muted">hapus semua pesan/packet room aktif tanpa revoke room.</span></div>', unsafe_allow_html=True)
-    if not render_room_creator_unlock(room):
+    if not render_room_creator_unlock(room, "panic_delete_chat"):
         return
     confirm = st.checkbox("Saya paham tindakan ini menghapus pesan room aktif", key="panic_delete_confirm")
     if st.button("Hapus chat sekarang", type="primary", use_container_width=True, disabled=not confirm):
