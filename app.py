@@ -238,6 +238,22 @@ a{color:var(--primary)!important;text-decoration:none!important;}
   margin-right:8px;
   box-shadow:var(--inner);
 }
+
+.admin-badge{
+  display:inline-flex;
+  align-items:center;
+  margin-left:5px;
+  padding:2px 7px;
+  border-radius:999px;
+  background:linear-gradient(135deg,#facc15,#fb923c);
+  color:#111827!important;
+  font-size:.68rem;
+  font-weight:900;
+  letter-spacing:.02em;
+  text-transform:uppercase;
+  box-shadow:0 8px 18px rgba(0,0,0,.14),var(--inner);
+}
+
 .muted{color:var(--muted)!important;font-size:.84rem;line-height:1.38;margin:.15rem 0 0;}
 .danger-box{
   background:linear-gradient(135deg,var(--danger-soft),var(--glass-soft));
@@ -322,6 +338,8 @@ html,body{margin:0;background:transparent;font-family:Inter,system-ui,-apple-sys
 .row.me .bubble small{color:rgba(255,255,255,.86);}
 .meta{font-size:10px;color:var(--muted);margin-top:4px;}
 .row.me .meta{color:rgba(255,255,255,.80);}
+.admin-badge{display:inline-flex;align-items:center;margin-left:5px;padding:1px 6px;border-radius:999px;background:linear-gradient(135deg,#facc15,#fb923c);color:#111827!important;font-size:9px;font-weight:900;letter-spacing:.02em;text-transform:uppercase;box-shadow:0 4px 12px rgba(0,0,0,.18);}
+.row.me .admin-badge{background:rgba(255,255,255,.92);color:#111827!important;}
 .empty{height:100%;display:flex;align-items:center;justify-content:center;color:var(--empty);text-align:center;}
 .packet{display:block;font-weight:800;margin-bottom:4px;color:inherit;}
 .thumb{max-width:min(220px,100%);max-height:150px;border-radius:18px;border:1px solid var(--line);object-fit:contain;display:block;margin-top:8px;background:rgba(255,255,255,.55);box-shadow:0 12px 30px rgba(0,0,0,.12);}
@@ -640,23 +658,77 @@ def validate_display_name(name: str, *, is_admin: bool = False, field_label: str
         st.warning(f"{field_label} tidak boleh kosong.")
         return None
     if is_reserved_display_name(cleaned) and not is_admin:
-        st.error("Nama adioranye dan Galuh Adi Insani hanya boleh digunakan oleh admin.")
+        st.error("Nama adioranye dan Galuh Adi Insani hanya boleh digunakan setelah login admin.")
         return None
     return cleaned
+
+
+def render_admin_login_box(*, success_username: str | None = None, context: str = "nama khusus") -> bool:
+    """Render login admin inline. Return True after admin login succeeds."""
+    admin_password = get_secret("CHAT_ADMIN_PASSWORD", "")
+    st.warning(f"{context} membutuhkan login admin terlebih dahulu.")
+    if not admin_password:
+        st.error("CHAT_ADMIN_PASSWORD belum diset di Streamlit Secrets atau environment variable.")
+        st.code('CHAT_ADMIN_PASSWORD = "password-yang-kuat"\nFERNET_KEY = "hasil-generate-fernet-key"')
+        return False
+    with st.form("reserved-name-admin-login"):
+        password = st.text_input("Password admin", type="password")
+        submitted = st.form_submit_button("Login admin untuk lanjut chat", use_container_width=True)
+    if not submitted:
+        return False
+    if hmac.compare_digest(password, admin_password):
+        st.session_state["admin_ok"] = True
+        if success_username:
+            st.session_state["username"] = success_username
+            st.session_state.pop("pending_reserved_username", None)
+        st.success("Login admin berhasil. Nama khusus sudah aktif.")
+        st.rerun()
+        return True
+    st.error("Password admin salah.")
+    return False
+
+
+def username_with_badge_html(username: str) -> str:
+    safe = html.escape(normalize_display_name(username))
+    if is_reserved_display_name(username):
+        return f'{safe} <span class="admin-badge">Admin</span>'
+    return safe
 
 
 def get_locked_username(is_admin: bool = False) -> str | None:
     locked = normalize_display_name(st.session_state.get("username", ""))[:40]
     if locked:
-        st.info(f"Nama pengguna terkunci: {locked}")
+        if is_reserved_display_name(locked) and not st.session_state.get("admin_ok"):
+            render_admin_login_box(success_username=locked, context=f"Nama {locked}")
+            return None
+        st.markdown(f'Nama pengguna terkunci: <b>{username_with_badge_html(locked)}</b>', unsafe_allow_html=True)
         return locked
+
+    pending_reserved = normalize_display_name(st.session_state.get("pending_reserved_username", ""))[:40]
+    if pending_reserved and is_reserved_display_name(pending_reserved) and not st.session_state.get("admin_ok"):
+        render_admin_login_box(success_username=pending_reserved, context=f"Nama {pending_reserved}")
+        if st.button("Gunakan nama lain", use_container_width=True):
+            st.session_state.pop("pending_reserved_username", None)
+            st.rerun()
+        return None
+
     with st.form("lock-username-form"):
         raw_name = st.text_input("Nama pengguna", placeholder="contoh: adiora", max_chars=40)
         submitted = st.form_submit_button("Tetapkan nama pengguna", use_container_width=True)
     if not submitted:
         st.info("Isi dan tetapkan nama pengguna untuk masuk ke room. Setelah ditetapkan, nama tidak bisa diubah selama sesi ini.")
         return None
-    username = validate_display_name(raw_name, is_admin=is_admin)
+
+    cleaned = normalize_display_name(raw_name)[:40]
+    if not cleaned:
+        st.warning("Nama pengguna tidak boleh kosong.")
+        return None
+    if is_reserved_display_name(cleaned) and not st.session_state.get("admin_ok"):
+        st.session_state["pending_reserved_username"] = cleaned
+        st.rerun()
+        return None
+
+    username = validate_display_name(cleaned, is_admin=bool(st.session_state.get("admin_ok")))
     if username is None:
         return None
     st.session_state["username"] = username
@@ -1065,7 +1137,9 @@ def render_chat(messages: list[dict[str, Any]], username: str) -> str:
         return CHAT_CSS + '<div class="chat"><div class="empty">Belum ada pesan. Mulai percakapan aman.</div></div>'
     rows = ""
     for msg in messages[-120:]:
-        sender = html.escape(str(msg.get("username", "unknown")))
+        raw_sender = str(msg.get("username", "unknown"))
+        sender = html.escape(raw_sender)
+        sender_label = username_with_badge_html(raw_sender)
         is_me = sender == html.escape(username)
         time_label = html.escape(str(msg.get("time", "")))
         msg_type = str(msg.get("type", "text"))
@@ -1082,7 +1156,7 @@ def render_chat(messages: list[dict[str, Any]], username: str) -> str:
                 if thumb and not thumb.startswith("["):
                     content += f'<img class="thumb" src="data:{mime};base64,{html.escape(thumb, quote=True)}" />'
         cls = "row me" if is_me else "row"
-        rows += f'<div class="{cls}"><div class="bubble">{content}<div class="meta">{sender}{" · kamu" if is_me else ""} · {time_label}</div></div></div>'
+        rows += f'<div class="{cls}"><div class="bubble">{content}<div class="meta">{sender_label}{" · kamu" if is_me else ""} · {time_label}</div></div></div>'
     return CHAT_CSS + f'<div class="chat">{rows}</div>'
 
 
@@ -1226,7 +1300,7 @@ def render_public_room_creator() -> None:
 
 def render_landing() -> None:
     st.markdown('<div class="hero"><span class="badge">🔐 secure</span><span class="badge">60 menit</span><span class="badge">auto revoke</span><h1>AntiTrust</h1><p class="muted">Room sementara terenkripsi. Buat link, share, lalu room otomatis direvoke.</p></div>', unsafe_allow_html=True)
-    st.caption("Nama pengguna terkunci setelah ditetapkan. Nama adioranye dan Galuh Adi Insani hanya untuk admin.")
+    st.caption("Nama pengguna terkunci setelah ditetapkan. Jika memakai nama adioranye atau Galuh Adi Insani, wajib login admin dan akan tampil badge khusus.")
     render_public_room_creator()
     with st.expander("Admin panel", expanded=False):
         render_admin_panel()
@@ -1406,7 +1480,7 @@ def main() -> None:
     active_users = update_online(room, username)
     messages = load_messages(room)
     config = get_room_config(room)
-    st.caption(f"{username} · {len(active_users)} aktif · sisa {format_countdown(room_seconds_left(room))} · kosong: {choice_from_minutes(config.get('auto_destroy_minutes'))}")
+    st.markdown(f'<span class="muted">{username_with_badge_html(username)} · {len(active_users)} aktif · sisa {format_countdown(room_seconds_left(room))} · kosong: {choice_from_minutes(config.get("auto_destroy_minutes"))}</span>', unsafe_allow_html=True)
     render_room_invite_panel(room, username)
     render_room_actions(room, username)
     render_room_settings(room)

@@ -10,9 +10,10 @@ Private temporary chat berbasis Streamlit dengan tampilan ringkas, glass-style, 
 - Invite link ikut direvoke saat room habis atau dihancurkan.
 - Invite link bisa dibagikan langsung via WhatsApp.
 - Nama pengguna terkunci setelah pertama kali ditetapkan.
-- Nama `adioranye` dan `Galuh Adi Insani` hanya bisa dipakai admin.
+- Jika user memakai nama `adioranye` atau `Galuh Adi Insani`, sistem menampilkan form login admin terlebih dahulu. Chat baru terbuka setelah login berhasil.
 - Tombol keluar room dihapus agar identitas tidak bisa direset.
 - Destroy room memakai countdown 3 detik dan bisa dibatalkan.
+- Nama khusus admin tampil dengan badge `Admin` di header room dan metadata chat.
 - Tampilan compact agar lebih ringan, sederhana, dan tidak terlalu banyak teks.
 
 ## Setup
