@@ -1584,7 +1584,7 @@ def render_public_room_creator() -> None:
         st.caption("Maksimal 60 menit. Auto revoke saat waktu habis.")
         col_a, col_b = st.columns(2)
         with col_a:
-            creator = st.text_input("Nama pembuat", placeholder="adiora", key="creator_name")
+            creator = st.text_input("Nama pembuat", placeholder="User", key="creator_name")
         with col_b:
             room = st.text_input("Nama room", placeholder="kelas-private-01", key="public_room_name")
         ttl = st.slider("Durasi room", min_value=1, max_value=ROOM_MAX_TTL_MINUTES, value=ROOM_DEFAULT_TTL_MINUTES, help="Maksimal 60 menit.", key="public_room_ttl")
