@@ -55,3 +55,9 @@ from cryptography.fernet import Fernet
 print(Fernet.generate_key().decode())
 PY
 ```
+
+## Update v13 - Compact Scroll
+- Tampilan room dibuat lebih ringkas agar tidak terlalu banyak scroll naik-turun.
+- Invite, fitur tambahan, file viewer, pengaturan, panic, dan destroy room dipindahkan ke satu **Panel room**.
+- Tinggi chat, countdown, form, tab, tombol, dan input dipadatkan.
+- Fitur v12 tetap dipertahankan.

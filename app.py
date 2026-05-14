@@ -281,6 +281,22 @@ a{color:var(--primary)!important;text-decoration:none!important;}
   -webkit-backdrop-filter:blur(22px) saturate(180%);
 }
 hr{border-color:var(--line)!important;}
+/* v13 compact layout: reduce vertical scroll */
+.block-container{max-width:780px!important;padding:.45rem .65rem .8rem!important;}
+[data-testid="stVerticalBlock"]{gap:.32rem!important;}
+[data-testid="stHorizontalBlock"]{gap:.35rem!important;}
+.hero{padding:9px 12px!important;margin-bottom:5px!important;border-radius:20px!important;}
+.hero h1{font-size:1.18rem!important;line-height:1.1!important;display:inline-block;margin-left:4px!important;}
+.hero .muted{display:inline;margin-left:6px!important;font-size:.76rem!important;}
+.badge{padding:3px 7px!important;font-size:.66rem!important;margin-right:4px!important;}
+.card{padding:8px 10px!important;margin:5px 0!important;border-radius:18px!important;}
+.danger-box{padding:8px 10px!important;margin:5px 0!important;}
+[data-testid="stExpander"] summary{padding:.38rem .65rem!important;font-size:.88rem!important;}
+.stTabs [data-baseweb="tab"]{height:34px!important;padding:.2rem .65rem!important;font-size:.86rem!important;}
+.stButton button,.stFormSubmitButton button,.stDownloadButton button{min-height:34px!important;padding:.28rem .7rem!important;}
+.stTextInput input,.stTextArea textarea,.stNumberInput input{min-height:34px!important;}
+[data-testid="stWidgetLabel"]{font-size:.82rem!important;}
+.stMarkdown p{margin-bottom:.2rem!important;}
 </style>
 """
 
@@ -318,7 +334,7 @@ CHAT_CSS = """
 }
 html,body{margin:0;background:transparent;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;color:var(--bubble-text);}
 .chat{
-  height:390px;
+  height:315px;
   overflow-y:auto;
   padding:11px;
   background:
@@ -1247,9 +1263,9 @@ def render_countdown(label: str, seconds_left: int) -> None:
     safe_label = html.escape(label)
     components.html(
         f"""
-        <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;border:1px solid rgba(255,255,255,.22);border-radius:18px;padding:8px 10px;background:rgba(255,255,255,.10);backdrop-filter:blur(18px);color:inherit">
-          <div style="font-size:11px;opacity:.72;margin-bottom:1px">{safe_label}</div>
-          <div id="countdown" style="font-size:21px;font-weight:800;letter-spacing:-.04em">{format_countdown(seconds_left)}</div>
+        <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;border:1px solid rgba(255,255,255,.22);border-radius:15px;padding:5px 8px;background:rgba(255,255,255,.10);backdrop-filter:blur(18px);color:inherit">
+          <div style="font-size:10px;opacity:.72;margin-bottom:0">{safe_label}</div>
+          <div id="countdown" style="font-size:16px;font-weight:800;letter-spacing:-.04em">{format_countdown(seconds_left)}</div>
         </div>
         <script>
           let left = {max(0, int(seconds_left))};
@@ -1263,7 +1279,7 @@ def render_countdown(label: str, seconds_left: int) -> None:
           tick(); setInterval(tick, 1000);
         </script>
         """,
-        height=60,
+        height=43,
     )
 
 
@@ -1439,7 +1455,7 @@ def render_packet_viewer(room: str, messages: list[dict[str, Any]]) -> None:
     if not packets:
         return
     with st.container(border=True):
-        st.subheader("Packet Viewer")
+        st.markdown("**Packet Viewer**")
         packet_map = {str(msg.get("id")): msg for msg in packets}
         selected = st.selectbox(
             "Pilih file terenkripsi",
@@ -1545,7 +1561,7 @@ def render_public_room_creator() -> None:
 
 
 def render_landing() -> None:
-    st.markdown('<div class="hero"><span class="badge">🔐 secure</span><span class="badge">60 menit</span><span class="badge">auto revoke</span><h1>AntiTrust</h1><p class="muted">Room sementara terenkripsi. Buat link, share, lalu room otomatis direvoke.</p></div>', unsafe_allow_html=True)
+    st.markdown('<div class="hero"><span class="badge">🔐 secure</span><span class="badge">60 menit</span><span class="badge">auto revoke</span><h1>AntiTrust</h1><p class="muted">Room terenkripsi sementara. Share link, auto revoke.</p></div>', unsafe_allow_html=True)
     st.caption("Nama pengguna terkunci setelah ditetapkan. Jika memakai nama adioranye atau Galuh Adi Insani, wajib login admin dan akan tampil badge khusus.")
     render_public_room_creator()
     with st.expander("Admin panel", expanded=False):
@@ -1756,13 +1772,13 @@ def render_feature_panel(room: str, username: str, messages: list[dict[str, Any]
 
 def render_message_form(room: str, username: str) -> None:
     with st.container(border=True):
-        st.subheader("Kirim")
+        st.markdown("**Kirim**")
         ttl_label = st.selectbox("Self-destruct pesan", list(MESSAGE_SELF_DESTRUCT_CHOICES.keys()), index=0, key="message_ttl")
         ttl_seconds = int(MESSAGE_SELF_DESTRUCT_CHOICES.get(ttl_label, 0))
         tab_text, tab_special, tab_img, tab_voice, tab_doc = st.tabs(["Text", "Secret", "Image", "Voice", "Doc"])
         with tab_text:
             with st.form("text-message", clear_on_submit=True):
-                message = st.text_area("Pesan", placeholder="Tulis pesan terenkripsi...", height=68, max_chars=MAX_TEXT_LENGTH)
+                message = st.text_area("Pesan", placeholder="Tulis pesan terenkripsi...", height=52, max_chars=MAX_TEXT_LENGTH)
                 submitted = st.form_submit_button("Kirim", use_container_width=True)
                 if submitted:
                     if not rate_limited("text"):
@@ -1772,7 +1788,7 @@ def render_message_form(room: str, username: str) -> None:
             kind = st.selectbox("Jenis", ["Secret Note", "One-Time Message", "Poll Cepat", "Location Pin", "Checklist Bersama"], key="special_kind")
             if kind in {"Secret Note", "One-Time Message"}:
                 with st.form("special-secret", clear_on_submit=True):
-                    secret_text = st.text_area("Isi", height=80, max_chars=MAX_TEXT_LENGTH)
+                    secret_text = st.text_area("Isi", height=58, max_chars=MAX_TEXT_LENGTH)
                     submitted = st.form_submit_button("Kirim secret", use_container_width=True)
                     if submitted and not rate_limited("secret"):
                         msg_type = "secret_note" if kind == "Secret Note" else "one_time"
@@ -1781,7 +1797,7 @@ def render_message_form(room: str, username: str) -> None:
             elif kind == "Poll Cepat":
                 with st.form("special-poll", clear_on_submit=True):
                     question = st.text_input("Pertanyaan", max_chars=160)
-                    options_raw = st.text_area("Opsi, satu baris satu pilihan", height=90, placeholder="18.00\n19.00\n20.00")
+                    options_raw = st.text_area("Opsi, satu baris satu pilihan", height=66, placeholder="18.00\n19.00\n20.00")
                     submitted = st.form_submit_button("Buat poll", use_container_width=True)
                     if submitted and not rate_limited("poll"):
                         options = [line.strip()[:80] for line in options_raw.splitlines() if line.strip()][:6]
@@ -1804,7 +1820,7 @@ def render_message_form(room: str, username: str) -> None:
             else:
                 with st.form("special-checklist", clear_on_submit=True):
                     title = st.text_input("Judul checklist", placeholder="Koordinasi cepat", max_chars=120)
-                    items_raw = st.text_area("Item, satu baris satu tugas", height=100, placeholder="Sudah kirim file\nSudah dibaca\nSudah approve")
+                    items_raw = st.text_area("Item, satu baris satu tugas", height=72, placeholder="Sudah kirim file\nSudah dibaca\nSudah approve")
                     submitted = st.form_submit_button("Buat checklist", use_container_width=True)
                     if submitted and not rate_limited("checklist"):
                         items = [line.strip()[:120] for line in items_raw.splitlines() if line.strip()][:12]
@@ -1838,6 +1854,21 @@ def render_message_form(room: str, username: str) -> None:
                     if payload:
                         append_media(room, username, "document", *payload)
                         st.rerun()
+
+
+def render_compact_room_panel(room: str, username: str, messages: list[dict[str, Any]]) -> None:
+    with st.expander("Panel room", expanded=False):
+        tab_invite, tab_features, tab_files, tab_security = st.tabs(["Invite", "Fitur", "File", "Aksi"])
+        with tab_invite:
+            render_room_invite_panel(room, username)
+        with tab_features:
+            render_feature_panel(room, username, messages)
+        with tab_files:
+            render_packet_viewer(room, messages)
+        with tab_security:
+            render_room_actions(room, username)
+            render_room_settings(room)
+            render_panic(room)
 
 
 def main() -> None:
@@ -1882,16 +1913,11 @@ def main() -> None:
     config = get_room_config(room)
     status = room_status_label(room, len(active_users))
     st.markdown(f'<span class="muted">{username_with_badge_html(username)} · status: {html.escape(status)} · {len(active_users)} aktif · sisa {format_countdown(room_seconds_left(room))} · kosong: {choice_from_minutes(config.get("auto_destroy_minutes"))}</span>', unsafe_allow_html=True)
-    render_room_invite_panel(room, username)
-    render_room_actions(room, username)
-    render_room_settings(room)
-    render_panic(room)
     render_sound_notice(latest_foreign_signature(messages, username), sound)
     render_pinned_message(room, messages)
-    render_feature_panel(room, username, messages)
+    render_compact_room_panel(room, username, messages)
     render_messages = prepare_messages_for_render(room, messages)
-    components.html(render_chat(render_messages, username), height=410, scrolling=False)
-    render_packet_viewer(room, messages)
+    components.html(render_chat(render_messages, username), height=333, scrolling=False)
     render_message_form(room, username)
 
 
