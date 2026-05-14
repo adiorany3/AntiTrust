@@ -1502,6 +1502,7 @@ def create_invite(room: str, ttl_minutes: int = INVITE_DEFAULT_TTL_MINUTES, crea
     invites[token_hash(token)] = {
         "room": encrypt_text(room),
         "room_key": room_key(room),
+        "token_cipher": encrypt_text(token),
         "created_by": encrypt_text(created_by.strip()[:80]) if created_by else "",
         "created_at": now_epoch(),
         "expires_at": min(now_epoch() + ttl_minutes * 60, int(config.get("expires_at", now_epoch() + ttl_minutes * 60))),
@@ -2062,6 +2063,44 @@ def destroy_room_by_settings_key(settings_key: str, room_name: str = "") -> tupl
     return count, revoked
 
 
+def get_active_invite_links_by_room_key(settings_key: str) -> list[dict[str, Any]]:
+    """Ambil semua invite link aktif untuk satu room.
+
+    Catatan: app versi lama hanya menyimpan hash token, jadi link lama yang
+    belum punya token_cipher tidak bisa dibangun ulang. Link baru setelah update
+    ini akan tampil lengkap di panel admin.
+    """
+    invites = load_json(INVITE_FILE)
+    now = now_epoch()
+    links: list[dict[str, Any]] = []
+    for item in invites.values():
+        if not isinstance(item, dict):
+            continue
+        if item.get("room_key") != settings_key or item.get("revoked"):
+            continue
+        expires_at = int(item.get("expires_at", 0) or 0)
+        if expires_at <= now:
+            continue
+        token_cipher = str(item.get("token_cipher", "") or "")
+        token = decrypt_text(token_cipher).strip() if token_cipher else ""
+        if not token or token.startswith("["):
+            links.append({
+                "url": "",
+                "seconds_left": max(0, expires_at - now),
+                "created_at": int(item.get("created_at", 0) or 0),
+                "legacy": True,
+            })
+            continue
+        links.append({
+            "url": build_invite_url(token),
+            "seconds_left": max(0, expires_at - now),
+            "created_at": int(item.get("created_at", 0) or 0),
+            "legacy": False,
+        })
+    links.sort(key=lambda item: item.get("seconds_left", 0))
+    return links
+
+
 def get_active_room_rows() -> list[dict[str, Any]]:
     """Daftar semua room yang masih aktif untuk halaman admin."""
     settings = load_json(ROOM_SETTINGS_FILE)
@@ -2083,12 +2122,15 @@ def get_active_room_rows() -> list[dict[str, Any]]:
         created_by = decrypt_text(str(config.get("created_by", ""))).strip() if config.get("created_by") else "anonymous"
         if not created_by or created_by.startswith("["):
             created_by = "anonymous"
+        invite_links = get_active_invite_links_by_room_key(key)
         rows.append({
             "key": key,
             "room": room_name,
             "created_by": created_by,
             "messages": len(messages) if isinstance(messages, list) else 0,
             "online": len(active_entries),
+            "invite_links": invite_links,
+            "invite_count": len(invite_links),
             "seconds_left": max(0, expires_at - now),
             "created_at": int(config.get("created_at", 0) or 0),
         })
@@ -2105,7 +2147,7 @@ def render_admin_active_rooms_panel() -> None:
         st.info("Belum ada room aktif.")
         return
 
-    st.caption(f"Total room aktif: {len(rows)}. Admin bisa revoke satu per satu atau semuanya.")
+    st.caption(f"Total room aktif: {len(rows)}. Admin bisa melihat invite link aktif, membuat link baru, dan revoke satu per satu atau semuanya.")
     for row in rows:
         room_label = row["room"]
         with st.container(border=True):
@@ -2114,9 +2156,38 @@ def render_admin_active_rooms_panel() -> None:
                 st.markdown(f"**{html.escape(room_label)}**")
                 st.caption(
                     f"Sisa waktu {format_countdown(row['seconds_left'])} · "
-                    f"Online {row['online']} · Pesan/packet {row['messages']} · Pembuat {row['created_by']}"
+                    f"Online {row['online']} · Pesan/packet {row['messages']} · "
+                    f"Link aktif {row.get('invite_count', 0)} · Pembuat {row['created_by']}"
                 )
+                invite_links = row.get("invite_links", []) if isinstance(row.get("invite_links"), list) else []
+                if invite_links:
+                    with st.expander("Lihat invite link aktif", expanded=False):
+                        for idx, link in enumerate(invite_links, start=1):
+                            if link.get("url"):
+                                render_click_to_copy_invite_link(
+                                    str(link.get("url", "")),
+                                    input_key=f"admin_active_invite::{row['key']}::{idx}",
+                                    label=f"Invite link {idx} · sisa {format_countdown(int(link.get('seconds_left', 0)))}",
+                                )
+                            else:
+                                st.caption(
+                                    f"Invite link {idx} masih aktif, tetapi token asli tidak tersedia karena dibuat sebelum update ini. "
+                                    f"Sisa {format_countdown(int(link.get('seconds_left', 0)))}."
+                                )
+                else:
+                    st.caption("Belum ada invite link aktif yang bisa ditampilkan untuk room ini.")
             with col_action:
+                if st.button("Buat link baru", use_container_width=True, key=f"admin_make_invite::{row['key']}"):
+                    # Buat invite baru dengan sisa waktu mengikuti sisa room, maksimal 7 hari untuk admin.
+                    minutes_left = max(1, (int(row.get("seconds_left", 0)) + 59) // 60)
+                    token = create_invite(
+                        room_label,
+                        ttl_minutes=minutes_left,
+                        created_by="admin",
+                        invite_max_ttl_minutes=ADMIN_ROOM_MAX_TTL_MINUTES,
+                    )
+                    st.success("Invite link baru berhasil dibuat. Link akan muncul di daftar room ini.")
+                    st.rerun()
                 confirm_key = f"admin_confirm_revoke::{row['key']}"
                 confirmed = st.checkbox("Konfirmasi", key=confirm_key)
                 if st.button("Revoke", type="primary", use_container_width=True, disabled=not confirmed, key=f"admin_revoke_room::{row['key']}"):
