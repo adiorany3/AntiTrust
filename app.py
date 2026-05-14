@@ -26,6 +26,12 @@ try:
 except Exception:  # pragma: no cover
     Image = None
 
+
+try:
+    import qrcode
+except Exception:  # pragma: no cover
+    qrcode = None
+
 try:
     from streamlit_autorefresh import st_autorefresh
 except Exception:  # pragma: no cover
@@ -51,6 +57,14 @@ MESSAGE_RATE_LIMIT_SECONDS = 1.5
 INVITE_DEFAULT_TTL_MINUTES = 60
 INVITE_MAX_TTL_MINUTES = 60
 ROOM_DEFAULT_TTL_MINUTES = 60
+MESSAGE_SELF_DESTRUCT_CHOICES = {
+    "Sampai room berakhir": 0,
+    "1 menit": 60,
+    "5 menit": 300,
+    "10 menit": 600,
+}
+REACTION_CHOICES = ["👍", "😂", "🔥", "✅", "👀"]
+
 ROOM_MAX_TTL_MINUTES = 60
 RESERVED_DISPLAY_NAMES = {"adioranye", "galuh adi insani"}
 
@@ -343,6 +357,11 @@ html,body{margin:0;background:transparent;font-family:Inter,system-ui,-apple-sys
 .empty{height:100%;display:flex;align-items:center;justify-content:center;color:var(--empty);text-align:center;}
 .packet{display:block;font-weight:800;margin-bottom:4px;color:inherit;}
 .thumb{max-width:min(220px,100%);max-height:150px;border-radius:18px;border:1px solid var(--line);object-fit:contain;display:block;margin-top:8px;background:rgba(255,255,255,.55);box-shadow:0 12px 30px rgba(0,0,0,.12);}
+
+.pin,.secret,.poll,.checklist,.location{display:block;font-weight:800;margin-bottom:4px;color:inherit;}
+.reactions{margin-top:6px;font-size:12px;opacity:.92;}
+.expire{font-size:10px;opacity:.75;margin-top:3px;}
+.pinned-card{border:1px solid var(--line);border-radius:16px;padding:8px 10px;margin:0 0 9px 0;background:rgba(250,204,21,.16);color:var(--bubble-text);}
 </style>
 """
 
@@ -759,6 +778,7 @@ def get_room_config(room: str) -> dict[str, Any]:
         "auto_destroy_minutes": int(minutes),
         "last_active_at": int(config.get("last_active_at", now_epoch())),
         "destroyed_at": int(config.get("destroyed_at", 0)),
+        "pinned_message_id": str(config.get("pinned_message_id", "") or ""),
     }
 
 
@@ -898,23 +918,196 @@ def rate_limited(action: str) -> bool:
     return False
 
 
-def append_text(room: str, username: str, text: str) -> None:
+def append_text(room: str, username: str, text: str, ttl_seconds: int = 0) -> None:
     clean = text.strip()[:MAX_TEXT_LENGTH]
     if not clean:
         return
     rooms = load_json(CHAT_FILE)
     key = room_key(room)
     rooms.setdefault(key, [])
-    rooms[key].append({
+    now = now_epoch()
+    message = {
         "id": secrets.token_urlsafe(18),
         "type": "text",
         "username": username,
         "text": encrypt_text(clean),
         "time": now_wib_label(),
-        "created_at": now_epoch(),
-    })
+        "created_at": now,
+        "expires_at": now + int(ttl_seconds) if int(ttl_seconds or 0) > 0 else 0,
+        "reactions": {},
+    }
+    rooms[key].append(message)
     atomic_write_json(CHAT_FILE, rooms)
     mark_room_active(room)
+
+
+def append_special_message(room: str, username: str, msg_type: str, payload: dict[str, Any], ttl_seconds: int = 0) -> None:
+    rooms = load_json(CHAT_FILE)
+    key = room_key(room)
+    rooms.setdefault(key, [])
+    now = now_epoch()
+    message: dict[str, Any] = {
+        "id": secrets.token_urlsafe(18),
+        "type": msg_type,
+        "username": username,
+        "time": now_wib_label(),
+        "created_at": now,
+        "expires_at": now + int(ttl_seconds) if int(ttl_seconds or 0) > 0 else 0,
+        "reactions": {},
+    }
+    message.update(payload)
+    rooms[key].append(message)
+    atomic_write_json(CHAT_FILE, rooms)
+    mark_room_active(room)
+
+
+def message_summary(msg: dict[str, Any]) -> str:
+    msg_type = str(msg.get("type", "text"))
+    sender = normalize_display_name(str(msg.get("username", "unknown")))
+    if msg_type == "text":
+        body = decrypt_text(str(msg.get("text", "")))[:42]
+    elif msg_type in {"secret_note", "one_time"}:
+        body = decrypt_text(str(msg.get("text", "")))[:42]
+    elif msg_type == "poll":
+        body = decrypt_text(str(msg.get("question", "")))[:42]
+    elif msg_type == "checklist":
+        body = decrypt_text(str(msg.get("title", "Checklist")))[:42]
+    elif msg_type == "location":
+        body = decrypt_text(str(msg.get("label", "Location")))[:42]
+    else:
+        body = str(msg.get("filename", msg_type))[:42]
+    return f"{sender} · {msg_type} · {body}"
+
+
+def purge_expired_messages(room: str) -> int:
+    rooms = load_json(CHAT_FILE)
+    key = room_key(room)
+    messages = rooms.get(key, [])
+    if not isinstance(messages, list):
+        return 0
+    now = now_epoch()
+    kept = []
+    removed = 0
+    removed_packet_paths = []
+    for msg in messages:
+        expires_at = int(msg.get("expires_at", 0) or 0)
+        if expires_at and expires_at <= now:
+            removed += 1
+            if msg.get("packet_path"):
+                removed_packet_paths.append(str(msg.get("packet_path")))
+            continue
+        kept.append(msg)
+    if removed:
+        rooms[key] = kept
+        atomic_write_json(CHAT_FILE, rooms)
+        for rel in removed_packet_paths:
+            path = resolve_packet_path(rel)
+            if path:
+                try:
+                    path.unlink()
+                except Exception:
+                    pass
+    return removed
+
+
+def remove_message(room: str, message_id: str) -> bool:
+    rooms = load_json(CHAT_FILE)
+    key = room_key(room)
+    messages = rooms.get(key, [])
+    if not isinstance(messages, list):
+        return False
+    new_messages = [m for m in messages if str(m.get("id")) != message_id]
+    if len(new_messages) == len(messages):
+        return False
+    rooms[key] = new_messages
+    atomic_write_json(CHAT_FILE, rooms)
+    mark_room_active(room)
+    return True
+
+
+def update_message(room: str, message_id: str, updater) -> bool:
+    rooms = load_json(CHAT_FILE)
+    key = room_key(room)
+    messages = rooms.get(key, [])
+    if not isinstance(messages, list):
+        return False
+    changed = False
+    for msg in messages:
+        if str(msg.get("id")) == message_id:
+            updater(msg)
+            changed = True
+            break
+    if changed:
+        rooms[key] = messages
+        atomic_write_json(CHAT_FILE, rooms)
+        mark_room_active(room)
+    return changed
+
+
+def add_reaction(room: str, message_id: str, username: str, emoji: str) -> bool:
+    if emoji not in REACTION_CHOICES:
+        return False
+    def _update(msg: dict[str, Any]) -> None:
+        reactions = msg.get("reactions") if isinstance(msg.get("reactions"), dict) else {}
+        users = reactions.get(emoji) if isinstance(reactions.get(emoji), list) else []
+        if username in users:
+            users.remove(username)
+        else:
+            users.append(username)
+        reactions[emoji] = users
+        msg["reactions"] = reactions
+    return update_message(room, message_id, _update)
+
+
+def set_pinned_message(room: str, message_id: str | None) -> None:
+    config = get_room_config(room)
+    config["pinned_message_id"] = message_id or ""
+    save_room_config(room, config)
+
+
+def update_poll_vote(room: str, message_id: str, username: str, option: str) -> bool:
+    def _update(msg: dict[str, Any]) -> None:
+        votes = msg.get("votes") if isinstance(msg.get("votes"), dict) else {}
+        votes[username] = option
+        msg["votes"] = votes
+    return update_message(room, message_id, _update)
+
+
+def update_checklist_item(room: str, message_id: str, index: int, checked: bool) -> bool:
+    def _update(msg: dict[str, Any]) -> None:
+        state = msg.get("checked") if isinstance(msg.get("checked"), dict) else {}
+        state[str(index)] = bool(checked)
+        msg["checked"] = state
+    return update_message(room, message_id, _update)
+
+
+def room_status_label(room: str, active_count: int) -> str:
+    left = room_seconds_left(room)
+    if left <= 0:
+        return "Revoked"
+    if left <= 300:
+        return "Closing soon"
+    if active_count > 0:
+        return "Active"
+    return "Waiting"
+
+
+def reaction_html(msg: dict[str, Any]) -> str:
+    reactions = msg.get("reactions") if isinstance(msg.get("reactions"), dict) else {}
+    parts = []
+    for emoji in REACTION_CHOICES:
+        users = reactions.get(emoji)
+        if isinstance(users, list) and users:
+            parts.append(f"{html.escape(emoji)} {len(set(users))}")
+    return f'<div class="reactions">{" · ".join(parts)}</div>' if parts else ""
+
+
+def expire_html(msg: dict[str, Any]) -> str:
+    expires_at = int(msg.get("expires_at", 0) or 0)
+    if not expires_at:
+        return ""
+    left = max(0, expires_at - now_epoch())
+    return f'<div class="expire">self-destruct {format_countdown(left)}</div>'
 
 
 def append_media(room: str, username: str, media_type: str, data: bytes, mime_type: str, filename: str) -> None:
@@ -945,6 +1138,7 @@ def append_media(room: str, username: str, media_type: str, data: bytes, mime_ty
 
 
 def load_messages(room: str) -> list[dict[str, Any]]:
+    purge_expired_messages(room)
     rooms = load_json(CHAT_FILE)
     messages = rooms.get(room_key(room), [])
     return messages if isinstance(messages, list) else []
@@ -1120,6 +1314,27 @@ def render_whatsapp_share(invite_url: str, room: str | None = None) -> None:
     st.link_button("Share WhatsApp", build_whatsapp_share_url(invite_url, room), use_container_width=True)
 
 
+def make_qr_png(data: str) -> bytes | None:
+    if not data or qrcode is None:
+        return None
+    try:
+        img = qrcode.make(data)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return buf.getvalue()
+    except Exception:
+        return None
+
+
+def render_qr_invite(invite_url: str) -> None:
+    png = make_qr_png(invite_url)
+    if png is None:
+        st.caption("QR invite membutuhkan package qrcode. Install requirements.txt versi terbaru.")
+        return
+    st.image(png, caption="QR Invite", width=180)
+    st.download_button("Download QR", data=png, file_name="antitrust-invite-qr.png", mime="image/png", use_container_width=True)
+
+
 def get_query_param(name: str) -> str | None:
     try:
         value = st.query_params.get(name)
@@ -1136,6 +1351,7 @@ def render_chat(messages: list[dict[str, Any]], username: str) -> str:
     if not messages:
         return CHAT_CSS + '<div class="chat"><div class="empty">Belum ada pesan. Mulai percakapan aman.</div></div>'
     rows = ""
+    pinned = [m for m in messages if m.get("_pinned")]
     for msg in messages[-120:]:
         raw_sender = str(msg.get("username", "unknown"))
         sender = html.escape(raw_sender)
@@ -1145,6 +1361,30 @@ def render_chat(messages: list[dict[str, Any]], username: str) -> str:
         msg_type = str(msg.get("type", "text"))
         if msg_type == "text":
             content = html.escape(decrypt_text(str(msg.get("text", ""))))
+        elif msg_type == "secret_note":
+            content = '<span class="secret">🔒 Secret Note</span><small>Buka lewat panel Fitur.</small>'
+        elif msg_type == "one_time":
+            content = '<span class="secret">👁️ One-Time Message</span><small>Buka sekali lewat panel Fitur, lalu pesan terhapus.</small>'
+        elif msg_type == "poll":
+            question = html.escape(decrypt_text(str(msg.get("question", ""))))
+            votes = msg.get("votes") if isinstance(msg.get("votes"), dict) else {}
+            options = msg.get("options") if isinstance(msg.get("options"), list) else []
+            counts = []
+            for opt_token in options:
+                opt = decrypt_text(str(opt_token))
+                total = sum(1 for v in votes.values() if v == opt)
+                counts.append(f"{html.escape(opt)}: {total}")
+            content = f'<span class="poll">📊 Poll</span>{question}<br><small>{" · ".join(counts)}</small>'
+        elif msg_type == "location":
+            label = html.escape(decrypt_text(str(msg.get("label", "Lokasi"))))
+            url = html.escape(decrypt_text(str(msg.get("url", ""))), quote=True)
+            content = f'<span class="location">📍 Location Pin</span><a href="{url}" target="_blank" rel="noopener noreferrer">{label}</a>'
+        elif msg_type == "checklist":
+            title = html.escape(decrypt_text(str(msg.get("title", "Checklist"))))
+            items = msg.get("items") if isinstance(msg.get("items"), list) else []
+            checked = msg.get("checked") if isinstance(msg.get("checked"), dict) else {}
+            done = sum(1 for i in range(len(items)) if checked.get(str(i)))
+            content = f'<span class="checklist">☑️ Checklist</span>{title}<br><small>{done}/{len(items)} selesai · kelola lewat panel Fitur</small>'
         else:
             filename = html.escape(str(msg.get("filename", "packet")))
             size = html.escape(format_bytes(msg.get("size_bytes", 0)))
@@ -1155,8 +1395,10 @@ def render_chat(messages: list[dict[str, Any]], username: str) -> str:
                 mime = html.escape(str(msg.get("thumbnail_mime", "image/jpeg")))
                 if thumb and not thumb.startswith("["):
                     content += f'<img class="thumb" src="data:{mime};base64,{html.escape(thumb, quote=True)}" />'
+        content += reaction_html(msg) + expire_html(msg)
+        pin = ' 📌' if msg.get("_pinned") else ''
         cls = "row me" if is_me else "row"
-        rows += f'<div class="{cls}"><div class="bubble">{content}<div class="meta">{sender_label}{" · kamu" if is_me else ""} · {time_label}</div></div></div>'
+        rows += f'<div class="{cls}"><div class="bubble">{content}<div class="meta">{sender_label}{" · kamu" if is_me else ""}{pin} · {time_label}</div></div></div>'
     return CHAT_CSS + f'<div class="chat">{rows}</div>'
 
 
@@ -1257,6 +1499,8 @@ def render_admin_panel() -> None:
         if st.session_state.get("last_invite"):
             st.text_input("Invite link", value=st.session_state["last_invite"])
             render_whatsapp_share(st.session_state["last_invite"], st.session_state.get("last_room"))
+            with st.expander("QR Invite", expanded=False):
+                render_qr_invite(st.session_state["last_invite"])
             render_countdown("Sisa waktu link", invite_seconds_left(st.session_state.get("last_invite_token")))
             if st.session_state.get("last_room"):
                 render_countdown("Sisa waktu room", room_seconds_left(st.session_state.get("last_room")))
@@ -1291,6 +1535,8 @@ def render_public_room_creator() -> None:
         if st.session_state.get("public_invite_url"):
             st.text_input("Invite link", value=st.session_state["public_invite_url"], key="public_invite_box")
             render_whatsapp_share(st.session_state["public_invite_url"], st.session_state.get("public_room"))
+            with st.expander("QR Invite", expanded=False):
+                render_qr_invite(st.session_state["public_invite_url"])
             col1, col2 = st.columns(2)
             with col1:
                 render_countdown("Sisa waktu link", invite_seconds_left(st.session_state.get("public_invite_token")))
@@ -1333,6 +1579,8 @@ def render_room_invite_panel(room: str, username: str) -> None:
         if st.session_state.get("room_invite_url"):
             st.text_input("Invite link", value=st.session_state["room_invite_url"], key="room_invite_url_box")
             render_whatsapp_share(st.session_state["room_invite_url"], room)
+            with st.expander("QR Invite", expanded=False):
+                render_qr_invite(st.session_state["room_invite_url"])
             render_countdown("Sisa waktu invite link", invite_seconds_left(st.session_state.get("room_invite_token")))
 
 
@@ -1402,17 +1650,169 @@ def render_panic(room: str) -> None:
         st.rerun()
 
 
+def prepare_messages_for_render(room: str, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    pinned_id = get_room_config(room).get("pinned_message_id", "")
+    prepared = []
+    for msg in messages:
+        copy_msg = dict(msg)
+        copy_msg["_pinned"] = bool(pinned_id and str(copy_msg.get("id")) == pinned_id)
+        prepared.append(copy_msg)
+    return prepared
+
+
+def render_pinned_message(room: str, messages: list[dict[str, Any]]) -> None:
+    pinned_id = get_room_config(room).get("pinned_message_id", "")
+    if not pinned_id:
+        return
+    msg = next((m for m in messages if str(m.get("id")) == pinned_id), None)
+    if not msg:
+        set_pinned_message(room, "")
+        return
+    st.markdown(f'<div class="card"><b>📌 Pinned</b><br><span class="muted">{html.escape(message_summary(msg))}</span></div>', unsafe_allow_html=True)
+
+
+def render_feature_panel(room: str, username: str, messages: list[dict[str, Any]]) -> None:
+    with st.expander("Fitur", expanded=False):
+        tab_secret, tab_poll, tab_check, tab_react, tab_pin = st.tabs(["Secret", "Poll", "Checklist", "React", "Pin"])
+        with tab_secret:
+            secret_messages = [m for m in messages if str(m.get("type")) in {"secret_note", "one_time"}]
+            if not secret_messages:
+                st.caption("Belum ada Secret Note atau One-Time Message.")
+            else:
+                msg_map = {str(m.get("id")): m for m in reversed(secret_messages)}
+                selected = st.selectbox("Pilih pesan rahasia", list(msg_map.keys()), format_func=lambda mid: message_summary(msg_map[mid]), key="secret_select")
+                if st.button("Buka pesan", use_container_width=True, key="open_secret_btn"):
+                    msg = msg_map[selected]
+                    st.session_state["opened_secret_text"] = decrypt_text(str(msg.get("text", "")))
+                    st.session_state["opened_secret_type"] = str(msg.get("type"))
+                    st.session_state["opened_secret_id"] = selected
+                    if str(msg.get("type")) == "one_time":
+                        remove_message(room, selected)
+                if st.session_state.get("opened_secret_text"):
+                    st.info(st.session_state.get("opened_secret_text"))
+                    if st.session_state.get("opened_secret_type") == "one_time":
+                        st.caption("One-Time Message sudah dihapus dari room setelah dibuka.")
+        with tab_poll:
+            polls = [m for m in messages if str(m.get("type")) == "poll"]
+            if not polls:
+                st.caption("Belum ada poll.")
+            else:
+                poll_map = {str(m.get("id")): m for m in reversed(polls)}
+                selected_poll = st.selectbox("Pilih poll", list(poll_map.keys()), format_func=lambda mid: message_summary(poll_map[mid]), key="poll_select")
+                msg = poll_map[selected_poll]
+                question = decrypt_text(str(msg.get("question", "")))
+                options = [decrypt_text(str(x)) for x in msg.get("options", []) if isinstance(x, str)]
+                votes = msg.get("votes") if isinstance(msg.get("votes"), dict) else {}
+                st.write(f"**{question}**")
+                selected_option = st.radio("Vote", options, index=options.index(votes.get(username)) if votes.get(username) in options else 0, key="poll_vote_radio") if options else None
+                if st.button("Simpan vote", use_container_width=True, key="save_vote_btn") and selected_option:
+                    update_poll_vote(room, selected_poll, username, selected_option)
+                    st.rerun()
+                for option in options:
+                    total = sum(1 for v in votes.values() if v == option)
+                    st.caption(f"{option}: {total} vote")
+        with tab_check:
+            lists = [m for m in messages if str(m.get("type")) == "checklist"]
+            if not lists:
+                st.caption("Belum ada checklist.")
+            else:
+                list_map = {str(m.get("id")): m for m in reversed(lists)}
+                selected_list = st.selectbox("Pilih checklist", list(list_map.keys()), format_func=lambda mid: message_summary(list_map[mid]), key="check_select")
+                msg = list_map[selected_list]
+                st.write(f"**{decrypt_text(str(msg.get('title', 'Checklist')))}**")
+                items = [decrypt_text(str(x)) for x in msg.get("items", []) if isinstance(x, str)]
+                state = msg.get("checked") if isinstance(msg.get("checked"), dict) else {}
+                for i, item in enumerate(items):
+                    checked = st.checkbox(item, value=bool(state.get(str(i))), key=f"check_{selected_list}_{i}")
+                    if bool(state.get(str(i))) != checked:
+                        update_checklist_item(room, selected_list, i, checked)
+                        st.rerun()
+        with tab_react:
+            if not messages:
+                st.caption("Belum ada pesan.")
+            else:
+                msg_map = {str(m.get("id")): m for m in reversed(messages)}
+                selected_msg = st.selectbox("Pilih pesan", list(msg_map.keys()), format_func=lambda mid: message_summary(msg_map[mid]), key="react_select")
+                emoji = st.radio("Reaction", REACTION_CHOICES, horizontal=True, key="react_emoji")
+                if st.button("Toggle reaction", use_container_width=True, key="react_btn"):
+                    add_reaction(room, selected_msg, username, emoji)
+                    st.rerun()
+        with tab_pin:
+            if not messages:
+                st.caption("Belum ada pesan.")
+            else:
+                msg_map = {str(m.get("id")): m for m in reversed(messages)}
+                selected_pin = st.selectbox("Pilih pesan untuk pin", list(msg_map.keys()), format_func=lambda mid: message_summary(msg_map[mid]), key="pin_select")
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    if st.button("Pin", use_container_width=True, key="pin_btn"):
+                        set_pinned_message(room, selected_pin)
+                        st.rerun()
+                with col_b:
+                    if st.button("Unpin", use_container_width=True, key="unpin_btn"):
+                        set_pinned_message(room, "")
+                        st.rerun()
+
+
 def render_message_form(room: str, username: str) -> None:
     with st.container(border=True):
-        st.subheader("Pesan")
-        with st.form("text-message", clear_on_submit=True):
-            message = st.text_area("Pesan", placeholder="Tulis pesan terenkripsi...", height=68, max_chars=MAX_TEXT_LENGTH)
-            submitted = st.form_submit_button("Kirim pesan", use_container_width=True)
-            if submitted:
-                if not rate_limited("text"):
-                    append_text(room, username, message)
-                    st.rerun()
-        tab_img, tab_voice, tab_doc = st.tabs(["🖼️ Image", "🎙️ Voice", "📎 Doc"])
+        st.subheader("Kirim")
+        ttl_label = st.selectbox("Self-destruct pesan", list(MESSAGE_SELF_DESTRUCT_CHOICES.keys()), index=0, key="message_ttl")
+        ttl_seconds = int(MESSAGE_SELF_DESTRUCT_CHOICES.get(ttl_label, 0))
+        tab_text, tab_special, tab_img, tab_voice, tab_doc = st.tabs(["Text", "Secret", "Image", "Voice", "Doc"])
+        with tab_text:
+            with st.form("text-message", clear_on_submit=True):
+                message = st.text_area("Pesan", placeholder="Tulis pesan terenkripsi...", height=68, max_chars=MAX_TEXT_LENGTH)
+                submitted = st.form_submit_button("Kirim", use_container_width=True)
+                if submitted:
+                    if not rate_limited("text"):
+                        append_text(room, username, message, ttl_seconds)
+                        st.rerun()
+        with tab_special:
+            kind = st.selectbox("Jenis", ["Secret Note", "One-Time Message", "Poll Cepat", "Location Pin", "Checklist Bersama"], key="special_kind")
+            if kind in {"Secret Note", "One-Time Message"}:
+                with st.form("special-secret", clear_on_submit=True):
+                    secret_text = st.text_area("Isi", height=80, max_chars=MAX_TEXT_LENGTH)
+                    submitted = st.form_submit_button("Kirim secret", use_container_width=True)
+                    if submitted and not rate_limited("secret"):
+                        msg_type = "secret_note" if kind == "Secret Note" else "one_time"
+                        append_special_message(room, username, msg_type, {"text": encrypt_text(secret_text.strip()[:MAX_TEXT_LENGTH])}, ttl_seconds)
+                        st.rerun()
+            elif kind == "Poll Cepat":
+                with st.form("special-poll", clear_on_submit=True):
+                    question = st.text_input("Pertanyaan", max_chars=160)
+                    options_raw = st.text_area("Opsi, satu baris satu pilihan", height=90, placeholder="18.00\n19.00\n20.00")
+                    submitted = st.form_submit_button("Buat poll", use_container_width=True)
+                    if submitted and not rate_limited("poll"):
+                        options = [line.strip()[:80] for line in options_raw.splitlines() if line.strip()][:6]
+                        if not question.strip() or len(options) < 2:
+                            st.warning("Poll butuh pertanyaan dan minimal 2 opsi.")
+                        else:
+                            append_special_message(room, username, "poll", {"question": encrypt_text(question.strip()[:160]), "options": [encrypt_text(o) for o in options], "votes": {}}, ttl_seconds)
+                            st.rerun()
+            elif kind == "Location Pin":
+                with st.form("special-location", clear_on_submit=True):
+                    label = st.text_input("Label lokasi", placeholder="Titik ketemu", max_chars=80)
+                    url = st.text_input("Link Maps/manual", placeholder="https://maps.google.com/...", max_chars=500)
+                    submitted = st.form_submit_button("Kirim lokasi", use_container_width=True)
+                    if submitted and not rate_limited("location"):
+                        if not url.startswith(("https://", "http://")):
+                            st.warning("Masukkan link lokasi yang valid.")
+                        else:
+                            append_special_message(room, username, "location", {"label": encrypt_text((label or "Lokasi").strip()[:80]), "url": encrypt_text(url.strip()[:500])}, ttl_seconds)
+                            st.rerun()
+            else:
+                with st.form("special-checklist", clear_on_submit=True):
+                    title = st.text_input("Judul checklist", placeholder="Koordinasi cepat", max_chars=120)
+                    items_raw = st.text_area("Item, satu baris satu tugas", height=100, placeholder="Sudah kirim file\nSudah dibaca\nSudah approve")
+                    submitted = st.form_submit_button("Buat checklist", use_container_width=True)
+                    if submitted and not rate_limited("checklist"):
+                        items = [line.strip()[:120] for line in items_raw.splitlines() if line.strip()][:12]
+                        if not items:
+                            st.warning("Checklist minimal punya 1 item.")
+                        else:
+                            append_special_message(room, username, "checklist", {"title": encrypt_text((title or "Checklist").strip()[:120]), "items": [encrypt_text(i) for i in items], "checked": {}}, ttl_seconds)
+                            st.rerun()
         with tab_img:
             image = st.file_uploader("Image", type=list(ALLOWED_IMAGE_TYPES))
             if st.button("Kirim image", use_container_width=True):
@@ -1480,13 +1880,17 @@ def main() -> None:
     active_users = update_online(room, username)
     messages = load_messages(room)
     config = get_room_config(room)
-    st.markdown(f'<span class="muted">{username_with_badge_html(username)} · {len(active_users)} aktif · sisa {format_countdown(room_seconds_left(room))} · kosong: {choice_from_minutes(config.get("auto_destroy_minutes"))}</span>', unsafe_allow_html=True)
+    status = room_status_label(room, len(active_users))
+    st.markdown(f'<span class="muted">{username_with_badge_html(username)} · status: {html.escape(status)} · {len(active_users)} aktif · sisa {format_countdown(room_seconds_left(room))} · kosong: {choice_from_minutes(config.get("auto_destroy_minutes"))}</span>', unsafe_allow_html=True)
     render_room_invite_panel(room, username)
     render_room_actions(room, username)
     render_room_settings(room)
     render_panic(room)
     render_sound_notice(latest_foreign_signature(messages, username), sound)
-    components.html(render_chat(messages, username), height=410, scrolling=False)
+    render_pinned_message(room, messages)
+    render_feature_panel(room, username, messages)
+    render_messages = prepare_messages_for_render(room, messages)
+    components.html(render_chat(render_messages, username), height=410, scrolling=False)
     render_packet_viewer(room, messages)
     render_message_form(room, username)
 

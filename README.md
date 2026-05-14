@@ -16,6 +16,20 @@ Private temporary chat berbasis Streamlit dengan tampilan ringkas, glass-style, 
 - Nama khusus admin tampil dengan badge `Admin` di header room dan metadata chat.
 - Tampilan compact agar lebih ringan, sederhana, dan tidak terlalu banyak teks.
 
+
+## Fitur interaktif tambahan
+
+- Secret Note: pesan rahasia dibuka melalui panel Fitur.
+- One-Time Message: pesan hilang setelah dibuka sekali.
+- Poll Cepat: voting sederhana di dalam room.
+- Location Pin: share link lokasi/manual maps tanpa live tracking.
+- Checklist Bersama: daftar tugas kecil yang bisa dicentang bersama.
+- Reaction Emoji: beri reaksi ke pesan.
+- Pinned Message: pin pesan penting di atas room.
+- Room Status: Waiting, Active, Closing soon, atau Revoked.
+- Self-destruct Message: pesan tertentu bisa hilang otomatis setelah 1, 5, atau 10 menit.
+- QR Invite: invite link bisa dibagikan lewat QR code.
+
 ## Setup
 
 ```bash
