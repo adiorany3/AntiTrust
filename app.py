@@ -365,7 +365,11 @@ hr{border-color:var(--line)!important;}
   .stButton button,.stFormSubmitButton button,.stDownloadButton button{min-height:32px!important;padding:.22rem .55rem!important;font-size:.80rem!important;}
   .stTextInput input,.stTextArea textarea,.stNumberInput input{min-height:32px!important;font-size:16px!important;}
   [data-testid="column"]{padding-left:.15rem!important;padding-right:.15rem!important;}
+  iframe[title="st.iframe"]{margin-bottom:-.45rem!important;}
 }
+iframe[title="st.iframe"]{display:block!important;}
+
+/* v18.1 message panel: iframe chat fills its frame so the send form stays close. */
 
 /* v13 compact layout: reduce vertical scroll */
 .block-container{max-width:780px!important;padding:.45rem .65rem .8rem!important;}
@@ -420,7 +424,8 @@ CHAT_CSS = """
 }
 html,body{margin:0;background:transparent;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;color:var(--bubble-text);}
 .chat{
-  height:315px;
+  height:calc(100vh - 2px);
+  min-height:315px;
   overflow-y:auto;
   padding:11px;
   background:
@@ -484,7 +489,7 @@ html,body{margin:0;background:transparent;font-family:Inter,system-ui,-apple-sys
 .pinned-card{border:1px solid var(--line);border-radius:16px;padding:8px 10px;margin:0 0 9px 0;background:rgba(250,204,21,.16);color:var(--bubble-text);}
 
 @media (max-width:760px){
-  .chat{height:360px;max-height:56vh;border-radius:18px;padding:8px;}
+  .chat{height:calc(100vh - 2px);min-height:360px;max-height:none;border-radius:18px;padding:8px;}
   .row{margin-bottom:7px;}
   .bubble{max-width:86%;padding:8px 9px;border-radius:16px;font-size:14px;line-height:1.36;}
   .meta{font-size:9px;gap:3px;}
@@ -1875,12 +1880,16 @@ def render_sidebar() -> tuple[bool, int, bool]:
     sound = st.sidebar.toggle("Suara pesan baru", value=True)
     if st.sidebar.button("Refresh manual", use_container_width=True):
         st.rerun()
-    st.sidebar.caption("Auto refresh chat aktif otomatis setiap 2 detik. Di HP, tampilan diarahkan ke area pesan.")
+    st.sidebar.caption("Auto refresh chat aktif otomatis setiap 2 detik. Di HP, fokus diarahkan ke area pesan dan form kirim.")
     return auto_refresh, interval, sound
 
 
 def render_message_focus_marker() -> None:
     st.markdown('<div id="antitrust-message-focus" class="message-focus-anchor"></div>', unsafe_allow_html=True)
+
+
+def render_compose_focus_marker() -> None:
+    st.markdown('<div id="antitrust-compose-focus" class="message-compose-anchor"></div>', unsafe_allow_html=True)
 
 
 def render_mobile_message_focus() -> None:
@@ -1893,13 +1902,13 @@ def render_mobile_message_focus() -> None:
             const parentWindow = window.parent;
             const parentDoc = parentWindow && parentWindow.document;
             if (!parentDoc) return;
-            const anchor = parentDoc.getElementById('antitrust-message-focus');
+            const anchor = parentDoc.getElementById('antitrust-compose-focus') || parentDoc.getElementById('antitrust-message-focus');
             if (!anchor) return;
             const isMobile = parentWindow.innerWidth <= 760;
             if (!isMobile) return;
             setTimeout(function(){
-              anchor.scrollIntoView({block: 'center', inline: 'nearest', behavior: 'auto'});
-            }, 120);
+              anchor.scrollIntoView({block: 'end', inline: 'nearest', behavior: 'auto'});
+            }, 90);
           } catch (e) {}
         })();
         </script>
@@ -2454,9 +2463,12 @@ def main() -> None:
     render_compact_room_panel(room, username, messages)
     render_messages = prepare_messages_for_render(room, messages)
     render_message_focus_marker()
-    components.html(render_chat(render_messages, username), height=392, scrolling=False)
-    render_mobile_message_focus()
+    # Height iframe dibuat pas dengan chat panel agar tidak ada ruang kosong besar
+    # antara panel pesan dan form kirim.
+    components.html(render_chat(render_messages, username), height=430, scrolling=False)
     render_message_form(room, username)
+    render_compose_focus_marker()
+    render_mobile_message_focus()
     if auto_refresh and st_autorefresh is not None:
         st_autorefresh(interval=interval * 1000, key="antitrust_message_refresh")
 

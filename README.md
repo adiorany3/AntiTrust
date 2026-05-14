@@ -137,3 +137,9 @@ PY
 - User sendiri diberi tanda `kamu` agar mudah dikenali.
 - Tampilan mobile dipadatkan: header lebih kecil, tab lebih pendek, tombol/input lebih ringan, dan online chip bisa digeser horizontal.
 - Tinggi chat box dioptimalkan agar pesan lebih nyaman dibaca di browser HP.
+
+## v18.1 - Optimasi Panel Message Mobile
+- Panel pesan sekarang mengisi penuh frame chat, sehingga tidak ada ruang kosong besar sebelum form kirim.
+- Area chat dibuat lebih dekat dengan tombol/input kirim.
+- Fokus auto-refresh di HP diarahkan ke area pesan dan form kirim agar tidak perlu sering scroll naik-turun.
+- Chat tetap auto-scroll ke pesan terbaru di dalam panel, bukan menggulung halaman utama.
