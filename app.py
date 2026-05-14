@@ -2400,29 +2400,35 @@ def render_message_form(room: str, username: str) -> None:
                             append_special_message(room, username, "checklist", {"title": encrypt_text((title or "Checklist").strip()[:120]), "items": [encrypt_text(i) for i in items], "checked": {}}, 0)
                             st.rerun()
         with tab_img:
-            image = st.file_uploader("Image", type=list(ALLOWED_IMAGE_TYPES))
-            if st.button("Kirim image", use_container_width=True):
+            image_reset = int(st.session_state.get("image_upload_reset", 0))
+            image = st.file_uploader("Image", type=list(ALLOWED_IMAGE_TYPES), key=f"image_upload::{image_reset}")
+            if st.button("Kirim image", use_container_width=True, key=f"send_image::{image_reset}"):
                 if not rate_limited("image"):
                     payload = validate_upload(image, "image")
                     if payload:
                         append_media(room, username, "image", *payload)
+                        st.session_state["image_upload_reset"] = image_reset + 1
                         st.rerun()
         with tab_voice:
-            audio = st.file_uploader("Audio", type=list(ALLOWED_AUDIO_TYPES))
-            recorded = st.audio_input("Rekam suara") if hasattr(st, "audio_input") else None
-            if st.button("Kirim voice", use_container_width=True):
+            audio_reset = int(st.session_state.get("audio_upload_reset", 0))
+            audio = st.file_uploader("Audio", type=list(ALLOWED_AUDIO_TYPES), key=f"audio_upload::{audio_reset}")
+            recorded = st.audio_input("Rekam suara", key=f"audio_record::{audio_reset}") if hasattr(st, "audio_input") else None
+            if st.button("Kirim voice", use_container_width=True, key=f"send_voice::{audio_reset}"):
                 if not rate_limited("audio"):
                     payload = validate_upload(recorded or audio, "audio")
                     if payload:
                         append_media(room, username, "audio", *payload)
+                        st.session_state["audio_upload_reset"] = audio_reset + 1
                         st.rerun()
         with tab_doc:
-            doc = st.file_uploader("Document", type=list(ALLOWED_DOCUMENT_TYPES))
-            if st.button("Kirim document", use_container_width=True):
+            doc_reset = int(st.session_state.get("document_upload_reset", 0))
+            doc = st.file_uploader("Document", type=list(ALLOWED_DOCUMENT_TYPES), key=f"document_upload::{doc_reset}")
+            if st.button("Kirim document", use_container_width=True, key=f"send_document::{doc_reset}"):
                 if not rate_limited("document"):
                     payload = validate_upload(doc, "document")
                     if payload:
                         append_media(room, username, "document", *payload)
+                        st.session_state["document_upload_reset"] = doc_reset + 1
                         st.rerun()
 
 
