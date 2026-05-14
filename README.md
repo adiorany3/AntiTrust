@@ -91,3 +91,11 @@ PY
 - Countdown invite/room berjalan client-side tanpa refresh Streamlit tiap detik.
 - Auto-scroll hanya menggeser kotak chat ke pesan terbaru, bukan halaman browser utama.
 - Tersedia tombol Refresh manual di sidebar.
+
+
+## Update v17.4
+
+- Auto refresh chat kembali aktif secara default.
+- Komponen refresh dipindahkan ke area pesan agar tidak menarik tampilan ke bagian atas halaman.
+- Pada layar HP, halaman otomatis diarahkan ke area message setelah refresh sehingga pengguna tidak perlu membuka setting sidebar.
+- Scroll pesan tetap terjadi di dalam kotak chat, bukan menggulung seluruh browser.

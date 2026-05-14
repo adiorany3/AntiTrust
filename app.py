@@ -1740,13 +1740,44 @@ def render_landing() -> None:
 
 def render_sidebar() -> tuple[bool, int, bool]:
     st.sidebar.title("🔐 AntiTrust")
-    auto_refresh = st.sidebar.toggle("Auto refresh chat", value=False, help="Matikan default agar halaman tidak lompat ke atas. Aktifkan hanya jika perlu memantau pesan tanpa klik refresh.")
-    interval = st.sidebar.selectbox("Interval", [10, 15, 30, 60], index=1)
+    # Auto refresh sengaja dibuat aktif secara default agar nyaman di HP.
+    # Komponen refresh ditempatkan dekat area chat, bukan di awal halaman, supaya fokus tetap ke pesan.
+    auto_refresh = True
+    interval = st.sidebar.selectbox("Interval refresh", [8, 10, 15, 30, 60], index=1)
     sound = st.sidebar.toggle("Suara pesan baru", value=True)
     if st.sidebar.button("Refresh manual", use_container_width=True):
         st.rerun()
-    st.sidebar.caption("Auto refresh default mati agar tampilan stabil.")
+    st.sidebar.caption("Auto refresh chat aktif otomatis. Di HP, tampilan diarahkan ke area pesan.")
     return auto_refresh, interval, sound
+
+
+def render_message_focus_marker() -> None:
+    st.markdown('<div id="antitrust-message-focus" class="message-focus-anchor"></div>', unsafe_allow_html=True)
+
+
+def render_mobile_message_focus() -> None:
+    """Keep mobile users focused on the message section after auto refresh reruns."""
+    components.html(
+        """
+        <script>
+        (function(){
+          try {
+            const parentWindow = window.parent;
+            const parentDoc = parentWindow && parentWindow.document;
+            if (!parentDoc) return;
+            const anchor = parentDoc.getElementById('antitrust-message-focus');
+            if (!anchor) return;
+            const isMobile = parentWindow.innerWidth <= 760;
+            if (!isMobile) return;
+            setTimeout(function(){
+              anchor.scrollIntoView({block: 'start', inline: 'nearest', behavior: 'auto'});
+            }, 120);
+          } catch (e) {}
+        })();
+        </script>
+        """,
+        height=0,
+    )
 
 
 def render_room_invite_panel(room: str, username: str) -> None:
@@ -2130,8 +2161,6 @@ def main() -> None:
     st.markdown(CSS, unsafe_allow_html=True)
     destroyed = purge_inactive_rooms()
     auto_refresh, interval, sound = render_sidebar()
-    if auto_refresh and st_autorefresh is not None:
-        st_autorefresh(interval=interval * 1000, key="antitrust_refresh")
     if destroyed:
         st.toast(f"{destroyed} room tidak aktif sudah dibersihkan.")
 
@@ -2192,8 +2221,12 @@ def main() -> None:
     render_pinned_message(room, messages)
     render_compact_room_panel(room, username, messages)
     render_messages = prepare_messages_for_render(room, messages)
+    render_message_focus_marker()
     components.html(render_chat(render_messages, username), height=333, scrolling=False)
+    render_mobile_message_focus()
     render_message_form(room, username)
+    if auto_refresh and st_autorefresh is not None:
+        st_autorefresh(interval=interval * 1000, key="antitrust_message_refresh")
 
 
 if __name__ == "__main__":
