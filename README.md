@@ -1,6 +1,6 @@
 # AntiTrust Secure Glass v6
 
-Versi perbaikan AntiTrust dengan tampilan glass/iPhone-style, room sementara, invite link, enkripsi Fernet, validasi file lebih ketat, leave room, destroy room + revoke key, dan auto-revoke otomatis saat waktu room habis.
+Versi perbaikan AntiTrust dengan tampilan glass/iPhone-style, room sementara, invite link, enkripsi Fernet, validasi file lebih ketat, destroy room + revoke key, identitas terkunci, dan auto-revoke otomatis saat waktu room habis.
 
 ## Fitur utama
 
@@ -10,7 +10,7 @@ Versi perbaikan AntiTrust dengan tampilan glass/iPhone-style, room sementara, in
 - **Countdown live** untuk sisa waktu room dan invite link.
 - **Semua user di room bisa create invite link** untuk mengajak orang lain.
 - **Invite link tidak bisa lebih lama dari sisa waktu room** dan tetap maksimal 60 menit.
-- **Tinggalkan room sekarang**: user keluar dari daftar online room aktif.
+- **Tidak ada fitur tinggalkan room**: user tidak bisa keluar-masuk untuk mengganti nama atau mengakali akses percakapan.
 - **Hancurkan room + revoke key**: user bisa menghancurkan room manual dan mencabut semua invite link.
 - **Panic destroy** untuk menghapus pesan/packet room aktif.
 - **Nama pengguna terkunci** setelah pertama kali ditetapkan selama sesi berjalan.

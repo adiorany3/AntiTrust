@@ -884,15 +884,6 @@ def panic_destroy(room: str) -> int:
     return count
 
 
-def leave_room(room: str, username: str) -> None:
-    online = load_json(ONLINE_FILE)
-    key = room_key(room)
-    if isinstance(online.get(key), dict):
-        online[key].pop(username, None)
-        if not online[key]:
-            online.pop(key, None)
-        atomic_write_json(ONLINE_FILE, online)
-
 
 def revoke_room_invites(room: str) -> int:
     invites = load_json(INVITE_FILE)
@@ -1247,29 +1238,18 @@ def render_room_invite_panel(room: str, username: str) -> None:
 
 def render_room_actions(room: str, username: str) -> None:
     with st.expander("Aksi room", expanded=False):
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Tinggalkan room sekarang", use_container_width=True):
-                leave_room(room, username)
-                # Nama pengguna sengaja tidak dihapus agar tetap terkunci selama sesi.
-                try:
-                    st.query_params.clear()
-                except Exception:
-                    pass
-                st.success("Kamu sudah keluar dari room.")
-                st.rerun()
-        with col2:
-            confirm = st.checkbox("Saya paham: room, pesan, packet, dan invite link akan dihancurkan", key="destroy_room_confirm")
-            if st.button("Hancurkan room + revoke key", type="primary", use_container_width=True, disabled=not confirm):
-                count, revoked = destroy_room_and_revoke(room)
-                st.session_state.pop("room_invite_url", None)
-                st.session_state.pop("room_invite_token", None)
-                try:
-                    st.query_params.clear()
-                except Exception:
-                    pass
-                st.success(f"Room dihancurkan. {count} pesan/packet dihapus dan {revoked} invite link direvoke.")
-                st.rerun()
+        st.caption("Fitur keluar room dinonaktifkan agar identitas tidak bisa direset untuk mengganti nama atau membaca ulang percakapan dengan identitas baru.")
+        confirm = st.checkbox("Saya paham: room, pesan, packet, dan invite link akan dihancurkan", key="destroy_room_confirm")
+        if st.button("Hancurkan room + revoke key", type="primary", use_container_width=True, disabled=not confirm):
+            count, revoked = destroy_room_and_revoke(room)
+            st.session_state.pop("room_invite_url", None)
+            st.session_state.pop("room_invite_token", None)
+            try:
+                st.query_params.clear()
+            except Exception:
+                pass
+            st.success(f"Room dihancurkan. {count} pesan/packet dihapus dan {revoked} invite link direvoke.")
+            st.rerun()
 
 
 def render_room_settings(room: str) -> None:
