@@ -2157,7 +2157,7 @@ def render_admin_panel() -> None:
 
         st.success("Admin aktif")
         room = st.text_input("Nama room tujuan", placeholder="kelas-private-01")
-        creator_password = st.text_input("Password pembuat room", type="password", help="Password ini dipakai untuk revoke room dan hapus chat tanpa login admin.", key="admin_creator_room_password")
+        st.caption("Admin tidak perlu mengisi password pembuat room. Aksi revoke dan hapus chat tetap bisa dilakukan selama login admin aktif.")
         admin_duration_options = {
             "1 jam": 60,
             "3 jam": 180,
@@ -2178,14 +2178,12 @@ def render_admin_panel() -> None:
             room = clean_room_name(room)
             if not room:
                 st.warning("Nama room tidak boleh kosong.")
-            elif len(str(creator_password or "").strip()) < 4:
-                st.warning("Password pembuat room minimal 4 karakter.")
             else:
                 token = create_room_with_invite(
                     room,
                     int(ttl),
                     "admin",
-                    creator_password,
+                    "",
                     max_lifetime_minutes=ADMIN_ROOM_MAX_TTL_MINUTES,
                     max_invite_ttl_minutes=ADMIN_ROOM_MAX_TTL_MINUTES,
                 )
