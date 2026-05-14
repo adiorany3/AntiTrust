@@ -1743,11 +1743,11 @@ def render_sidebar() -> tuple[bool, int, bool]:
     # Auto refresh sengaja dibuat aktif secara default agar nyaman di HP.
     # Komponen refresh ditempatkan dekat area chat, bukan di awal halaman, supaya fokus tetap ke pesan.
     auto_refresh = True
-    interval = st.sidebar.selectbox("Interval refresh", [8, 10, 15, 30, 60], index=1)
+    interval = st.sidebar.selectbox("Interval refresh", [2, 5, 8, 10, 15, 30, 60], index=0)
     sound = st.sidebar.toggle("Suara pesan baru", value=True)
     if st.sidebar.button("Refresh manual", use_container_width=True):
         st.rerun()
-    st.sidebar.caption("Auto refresh chat aktif otomatis. Di HP, tampilan diarahkan ke area pesan.")
+    st.sidebar.caption("Auto refresh chat aktif otomatis setiap 2 detik. Di HP, tampilan diarahkan ke area pesan.")
     return auto_refresh, interval, sound
 
 

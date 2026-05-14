@@ -99,3 +99,9 @@ PY
 - Komponen refresh dipindahkan ke area pesan agar tidak menarik tampilan ke bagian atas halaman.
 - Pada layar HP, halaman otomatis diarahkan ke area message setelah refresh sehingga pengguna tidak perlu membuka setting sidebar.
 - Scroll pesan tetap terjadi di dalam kotak chat, bukan menggulung seluruh browser.
+
+
+## Update v17.5
+- Interval auto-refresh default diubah menjadi 2 detik.
+- Pilihan interval kini tersedia: 2, 5, 8, 10, 15, 30, dan 60 detik.
+- Auto-refresh tetap aktif default dan tetap difokuskan ke area pesan.
