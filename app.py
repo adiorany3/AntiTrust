@@ -2160,6 +2160,12 @@ def get_active_room_rows() -> list[dict[str, Any]]:
             continue
         room_name = decode_room_name_from_config(config, key)
         active_entries = normalize_online_entries(online.get(key, {}), now)
+        online_users = []
+        for entry in active_entries.values():
+            name = normalize_display_name(entry.get("username", ""))
+            if name:
+                online_users.append(name)
+        online_users = sorted(set(online_users), key=lambda value: value.casefold())
         messages = rooms.get(key, [])
         created_by = decrypt_text(str(config.get("created_by", ""))).strip() if config.get("created_by") else "anonymous"
         if not created_by or created_by.startswith("["):
@@ -2171,6 +2177,7 @@ def get_active_room_rows() -> list[dict[str, Any]]:
             "created_by": created_by,
             "messages": len(messages) if isinstance(messages, list) else 0,
             "online": len(active_entries),
+            "online_users": online_users,
             "invite_links": invite_links,
             "invite_count": len(invite_links),
             "seconds_left": max(0, expires_at - now),
@@ -2201,6 +2208,13 @@ def render_admin_active_rooms_panel() -> None:
                     f"Online {row['online']} · Pesan/packet {row['messages']} · "
                     f"Link aktif {row.get('invite_count', 0)} · Pembuat {row['created_by']}"
                 )
+                online_users = row.get("online_users", []) if isinstance(row.get("online_users"), list) else []
+                if online_users:
+                    safe_users = [html.escape(str(name)) for name in online_users]
+                    st.markdown("**User online:** " + ", ".join(safe_users), unsafe_allow_html=True)
+                else:
+                    st.caption("User online: belum ada user aktif di room ini.")
+
                 invite_links = row.get("invite_links", []) if isinstance(row.get("invite_links"), list) else []
                 if invite_links:
                     with st.expander("Lihat invite link aktif", expanded=False):
