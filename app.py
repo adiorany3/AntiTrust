@@ -52,6 +52,7 @@ INVITE_DEFAULT_TTL_MINUTES = 60
 INVITE_MAX_TTL_MINUTES = 60
 ROOM_DEFAULT_TTL_MINUTES = 60
 ROOM_MAX_TTL_MINUTES = 60
+RESERVED_DISPLAY_NAMES = {"adioranye", "galuh adi insani"}
 
 ALLOWED_IMAGE_TYPES = {"png", "jpg", "jpeg", "webp"}
 ALLOWED_AUDIO_TYPES = {"wav", "mp3", "ogg", "m4a", "aac", "flac", "webm"}
@@ -616,6 +617,49 @@ def clean_room_name(room: str) -> str:
     return clean
 
 
+def normalize_display_name(name: str) -> str:
+    return " ".join(str(name or "").strip().split())
+
+
+def canonical_display_name(name: str) -> str:
+    return normalize_display_name(name).casefold()
+
+
+def is_reserved_display_name(name: str) -> bool:
+    return canonical_display_name(name) in RESERVED_DISPLAY_NAMES
+
+
+def validate_display_name(name: str, *, is_admin: bool = False, field_label: str = "Nama pengguna") -> str | None:
+    cleaned = normalize_display_name(name)[:40]
+    if not cleaned:
+        st.warning(f"{field_label} tidak boleh kosong.")
+        return None
+    if is_reserved_display_name(cleaned) and not is_admin:
+        st.error("Nama adioranye dan Galuh Adi Insani hanya boleh digunakan oleh admin.")
+        return None
+    return cleaned
+
+
+def get_locked_username(is_admin: bool = False) -> str | None:
+    locked = normalize_display_name(st.session_state.get("username", ""))[:40]
+    if locked:
+        st.info(f"Nama pengguna terkunci: {locked}")
+        return locked
+    with st.form("lock-username-form"):
+        raw_name = st.text_input("Nama pengguna", placeholder="contoh: adiora", max_chars=40)
+        submitted = st.form_submit_button("Tetapkan nama pengguna", use_container_width=True)
+    if not submitted:
+        st.info("Isi dan tetapkan nama pengguna untuk masuk ke room. Setelah ditetapkan, nama tidak bisa diubah selama sesi ini.")
+        return None
+    username = validate_display_name(raw_name, is_admin=is_admin)
+    if username is None:
+        return None
+    st.session_state["username"] = username
+    st.success("Nama pengguna sudah ditetapkan dan dikunci.")
+    st.rerun()
+    return username
+
+
 def clamp_minutes(value: int, maximum: int = ROOM_MAX_TTL_MINUTES) -> int:
     return min(max(1, int(value)), int(maximum))
 
@@ -1147,7 +1191,10 @@ def render_public_room_creator() -> None:
             if not room:
                 st.warning("Nama room tidak boleh kosong.")
                 return
-            token = create_room_with_invite(room, int(ttl), creator or "public")
+            creator_name = validate_display_name(creator or "public", is_admin=bool(st.session_state.get("admin_ok")), field_label="Nama pembuat")
+            if creator_name is None:
+                return
+            token = create_room_with_invite(room, int(ttl), creator_name)
             st.session_state["public_invite_url"] = build_invite_url(token)
             st.session_state["public_invite_token"] = token
             st.session_state["public_room"] = room
@@ -1163,7 +1210,7 @@ def render_public_room_creator() -> None:
 
 def render_landing() -> None:
     st.markdown('<div class="hero"><span class="badge">🔐 public create</span><span class="badge">max 60 menit</span><span class="badge">auto revoke</span><h1>AntiTrust</h1><p class="muted">Private chat sederhana dengan room sementara, enkripsi Fernet, invite link, dan auto-revoke saat waktu room habis.</p></div>', unsafe_allow_html=True)
-    st.info("Buat room baru atau masuk memakai invite link. Semua room otomatis berakhir maksimal 60 menit.")
+    st.info("Buat room baru atau masuk memakai invite link. Semua room otomatis berakhir maksimal 60 menit. Nama pengguna dikunci setelah ditetapkan; nama adioranye dan Galuh Adi Insani hanya untuk admin.")
     render_public_room_creator()
     with st.expander("Admin panel", expanded=False):
         render_admin_panel()
@@ -1204,7 +1251,7 @@ def render_room_actions(room: str, username: str) -> None:
         with col1:
             if st.button("Tinggalkan room sekarang", use_container_width=True):
                 leave_room(room, username)
-                st.session_state.pop("username", None)
+                # Nama pengguna sengaja tidak dihapus agar tetap terkunci selama sesi.
                 try:
                     st.query_params.clear()
                 except Exception:
@@ -1313,10 +1360,8 @@ def main() -> None:
         render_countdown("Sisa waktu room", room_seconds_left(room))
     with col_timer2:
         render_countdown("Sisa waktu invite link", current_invite_left)
-    username = st.text_input("Nama pengguna", placeholder="contoh: adiora")
-    username = username.strip()[:40]
+    username = get_locked_username(is_admin=bool(st.session_state.get("admin_ok")))
     if not username:
-        st.info("Isi nama pengguna untuk masuk ke room.")
         return
 
     if room_is_expired(room):

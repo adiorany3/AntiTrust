@@ -1,4 +1,4 @@
-# AntiTrust Secure Glass v5
+# AntiTrust Secure Glass v6
 
 Versi perbaikan AntiTrust dengan tampilan glass/iPhone-style, room sementara, invite link, enkripsi Fernet, validasi file lebih ketat, leave room, destroy room + revoke key, dan auto-revoke otomatis saat waktu room habis.
 
@@ -13,6 +13,8 @@ Versi perbaikan AntiTrust dengan tampilan glass/iPhone-style, room sementara, in
 - **Tinggalkan room sekarang**: user keluar dari daftar online room aktif.
 - **Hancurkan room + revoke key**: user bisa menghancurkan room manual dan mencabut semua invite link.
 - **Panic destroy** untuk menghapus pesan/packet room aktif.
+- **Nama pengguna terkunci** setelah pertama kali ditetapkan selama sesi berjalan.
+- **Reserved name protection**: `adioranye` dan `Galuh Adi Insani` hanya bisa digunakan oleh admin.
 
 ## Jalankan lokal
 
@@ -47,3 +49,4 @@ PY
 - Saat room expired, semua invite link untuk room tersebut ditandai revoked.
 - File upload dibatasi ukuran dan diverifikasi berdasarkan magic bytes/struktur file.
 - Room dan packet disimpan memakai key hash, bukan nama room mentah.
+- Nama pengguna yang sudah ditetapkan tidak bisa diedit dari UI room. Untuk memakai nama reserved, login admin terlebih dahulu.
