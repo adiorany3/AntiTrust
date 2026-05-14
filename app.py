@@ -66,6 +66,8 @@ MESSAGE_SELF_DESTRUCT_CHOICES = {
 REACTION_CHOICES = ["👍", "😂", "🔥", "✅", "👀"]
 
 ROOM_MAX_TTL_MINUTES = 60
+ADMIN_ROOM_MAX_TTL_MINUTES = 10080  # 7 hari, khusus admin
+ADMIN_ROOM_DEFAULT_TTL_MINUTES = 1440  # 24 jam
 RESERVED_DISPLAY_NAMES = {"adioranye", "galuh adi insani"}
 
 ALLOWED_IMAGE_TYPES = {"png", "jpg", "jpeg", "webp"}
@@ -1489,11 +1491,11 @@ def token_hash(token: str) -> str:
     return hmac_digest(token)
 
 
-def create_invite(room: str, ttl_minutes: int = INVITE_DEFAULT_TTL_MINUTES, created_by: str = "") -> str:
+def create_invite(room: str, ttl_minutes: int = INVITE_DEFAULT_TTL_MINUTES, created_by: str = "", invite_max_ttl_minutes: int = INVITE_MAX_TTL_MINUTES) -> str:
     room = clean_room_name(room)
     config = ensure_room_config(room, ROOM_DEFAULT_TTL_MINUTES, created_by)
     room_left_seconds = max(1, int(config.get("expires_at", now_epoch())) - now_epoch())
-    max_ttl_minutes = max(1, min(INVITE_MAX_TTL_MINUTES, (room_left_seconds + 59) // 60))
+    max_ttl_minutes = max(1, min(int(invite_max_ttl_minutes), (room_left_seconds + 59) // 60))
     ttl_minutes = clamp_minutes(ttl_minutes, max_ttl_minutes)
     token = secrets.token_urlsafe(32)
     invites = load_json(INVITE_FILE)
@@ -1509,10 +1511,19 @@ def create_invite(room: str, ttl_minutes: int = INVITE_DEFAULT_TTL_MINUTES, crea
     return token
 
 
-def create_room_with_invite(room: str, lifetime_minutes: int, created_by: str = "", creator_password: str = "") -> str:
+def create_room_with_invite(
+    room: str,
+    lifetime_minutes: int,
+    created_by: str = "",
+    creator_password: str = "",
+    *,
+    max_lifetime_minutes: int = ROOM_MAX_TTL_MINUTES,
+    max_invite_ttl_minutes: int = INVITE_MAX_TTL_MINUTES,
+) -> str:
     room = clean_room_name(room)
-    ensure_room_config(room, clamp_minutes(lifetime_minutes, ROOM_MAX_TTL_MINUTES), created_by, creator_password)
-    return create_invite(room, clamp_minutes(lifetime_minutes, INVITE_MAX_TTL_MINUTES), created_by)
+    lifetime = clamp_minutes(lifetime_minutes, max_lifetime_minutes)
+    ensure_room_config(room, lifetime, created_by, creator_password)
+    return create_invite(room, lifetime, created_by, max_invite_ttl_minutes)
 
 
 def get_invite_item(token: str | None) -> dict[str, Any] | None:
@@ -2147,7 +2158,22 @@ def render_admin_panel() -> None:
         st.success("Admin aktif")
         room = st.text_input("Nama room tujuan", placeholder="kelas-private-01")
         creator_password = st.text_input("Password pembuat room", type="password", help="Password ini dipakai untuk revoke room dan hapus chat tanpa login admin.", key="admin_creator_room_password")
-        ttl = st.slider("Masa aktif room & invite link", min_value=1, max_value=ROOM_MAX_TTL_MINUTES, value=ROOM_DEFAULT_TTL_MINUTES, help="Maksimal 1 jam. Tampilan link hanya muncul 1 menit setelah dibuat, tanpa revoke.")
+        admin_duration_options = {
+            "1 jam": 60,
+            "3 jam": 180,
+            "6 jam": 360,
+            "12 jam": 720,
+            "24 jam": 1440,
+            "3 hari": 4320,
+            "7 hari": 10080,
+        }
+        ttl_label = st.selectbox(
+            "Masa aktif room & invite link",
+            options=list(admin_duration_options.keys()),
+            index=4,
+            help="Khusus admin bisa membuat room lebih lama, maksimal 7 hari. Tampilan link tetap hanya muncul 1 menit setelah dibuat, tanpa revoke.",
+        )
+        ttl = admin_duration_options[ttl_label]
         if st.button("Buat room + invite link", use_container_width=True):
             room = clean_room_name(room)
             if not room:
@@ -2155,12 +2181,19 @@ def render_admin_panel() -> None:
             elif len(str(creator_password or "").strip()) < 4:
                 st.warning("Password pembuat room minimal 4 karakter.")
             else:
-                token = create_room_with_invite(room, int(ttl), "admin", creator_password)
+                token = create_room_with_invite(
+                    room,
+                    int(ttl),
+                    "admin",
+                    creator_password,
+                    max_lifetime_minutes=ADMIN_ROOM_MAX_TTL_MINUTES,
+                    max_invite_ttl_minutes=ADMIN_ROOM_MAX_TTL_MINUTES,
+                )
                 st.session_state["last_invite"] = build_invite_url(token)
                 st.session_state["last_invite_token"] = token
                 st.session_state["last_room"] = room
                 st.session_state["last_invite_display_until"] = now_epoch() + 60
-                st.success("Room dan invite link berhasil dibuat. Link hanya ditampilkan 1 menit, tanpa revoke.")
+                st.success(f"Room dan invite link berhasil dibuat untuk {ttl_label}. Link hanya ditampilkan 1 menit, tanpa revoke.")
         if render_temporary_invite_link(
             url_key="last_invite",
             token_key="last_invite_token",
