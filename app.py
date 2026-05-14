@@ -816,6 +816,17 @@ def clean_room_name(room: str) -> str:
     return clean
 
 
+
+
+def generate_random_room_name(prefix: str = "room") -> str:
+    """Create a random room name so users do not need to type one manually."""
+    settings = load_json(ROOM_SETTINGS_FILE)
+    for _ in range(20):
+        candidate = clean_room_name(f"{prefix}-{secrets.token_hex(3)}-{secrets.token_hex(2)}")
+        if room_key(candidate) not in settings:
+            return candidate
+    return clean_room_name(f"{prefix}-{secrets.token_urlsafe(8).replace('_', '').replace('-', '').lower()[:10]}")
+
 def normalize_display_name(name: str) -> str:
     return " ".join(str(name or "").strip().split())
 
@@ -2258,8 +2269,7 @@ def render_admin_panel() -> None:
             return
 
         st.success("Admin aktif")
-        room = st.text_input("Nama room tujuan", placeholder="kelas-private-01")
-        st.caption("Admin tidak perlu mengisi password pembuat room. Aksi revoke dan hapus chat tetap bisa dilakukan selama login admin aktif.")
+        st.caption("Nama room dibuat otomatis dan acak. Admin tidak perlu mengisi password pembuat room. Aksi revoke dan hapus chat tetap bisa dilakukan selama login admin aktif.")
         admin_duration_options = {
             "1 jam": 60,
             "3 jam": 180,
@@ -2276,24 +2286,21 @@ def render_admin_panel() -> None:
             help="Khusus admin bisa membuat room lebih lama, maksimal 7 hari. Tampilan link tetap hanya muncul 1 menit setelah dibuat, tanpa revoke.",
         )
         ttl = admin_duration_options[ttl_label]
-        if st.button("Buat room + invite link", use_container_width=True):
-            room = clean_room_name(room)
-            if not room:
-                st.warning("Nama room tidak boleh kosong.")
-            else:
-                token = create_room_with_invite(
-                    room,
-                    int(ttl),
-                    "admin",
-                    "",
-                    max_lifetime_minutes=ADMIN_ROOM_MAX_TTL_MINUTES,
-                    max_invite_ttl_minutes=ADMIN_ROOM_MAX_TTL_MINUTES,
-                )
-                st.session_state["last_invite"] = build_invite_url(token)
-                st.session_state["last_invite_token"] = token
-                st.session_state["last_room"] = room
-                st.session_state["last_invite_display_until"] = now_epoch() + 60
-                st.success(f"Room dan invite link berhasil dibuat untuk {ttl_label}. Link hanya ditampilkan 1 menit, tanpa revoke.")
+        if st.button("Buat room otomatis + invite link", use_container_width=True):
+            room = generate_random_room_name("admin")
+            token = create_room_with_invite(
+                room,
+                int(ttl),
+                "admin",
+                "",
+                max_lifetime_minutes=ADMIN_ROOM_MAX_TTL_MINUTES,
+                max_invite_ttl_minutes=ADMIN_ROOM_MAX_TTL_MINUTES,
+            )
+            st.session_state["last_invite"] = build_invite_url(token)
+            st.session_state["last_invite_token"] = token
+            st.session_state["last_room"] = room
+            st.session_state["last_invite_display_until"] = now_epoch() + 60
+            st.success(f"Room otomatis `{room}` berhasil dibuat untuk {ttl_label}. Link hanya ditampilkan 1 menit, tanpa revoke.")
         if render_temporary_invite_link(
             url_key="last_invite",
             token_key="last_invite_token",
@@ -2314,28 +2321,23 @@ def render_admin_panel() -> None:
 
 def render_public_room_creator() -> None:
     st.markdown('<div class="terminal-card">', unsafe_allow_html=True)
-    st.markdown('<div class="terminal-note">$ create_room --anonymous --temporary-link</div>', unsafe_allow_html=True)
+    st.markdown('<div class="terminal-note">$ create_room --anonymous --random --temporary-link</div>', unsafe_allow_html=True)
     st.subheader("Buat room")
-    st.caption("Tidak perlu nama pembuat. Room tetap mengikuti durasi yang dipilih. Link hanya tampil 1 menit, tanpa revoke.")
-    room = st.text_input("Nama room", placeholder="kelas-private-01", key="public_room_name")
+    st.caption("Nama room dibuat otomatis dan acak. Kamu hanya perlu isi password pembuat room. Link hanya tampil 1 menit, tanpa revoke.")
     creator_password = st.text_input("Password pembuat room", type="password", help="Password ini dipakai pembuat room untuk revoke room dan hapus chat.", key="public_creator_room_password")
     ttl = st.slider("Durasi room", min_value=1, max_value=ROOM_MAX_TTL_MINUTES, value=ROOM_DEFAULT_TTL_MINUTES, help="Maksimal 60 menit. Tampilan link hilang otomatis setelah 1 menit, tanpa revoke.", key="public_room_ttl")
-    if st.button("Create room + link", use_container_width=True):
-        room = clean_room_name(room)
-        if not room:
-            st.warning("Nama room tidak boleh kosong.")
-            st.markdown('</div>', unsafe_allow_html=True)
-            return
+    if st.button("Create random room + link", use_container_width=True):
         if len(str(creator_password or "").strip()) < 4:
             st.warning("Password pembuat room minimal 4 karakter.")
             st.markdown('</div>', unsafe_allow_html=True)
             return
+        room = generate_random_room_name("anon")
         token = create_room_with_invite(room, int(ttl), "anonymous", creator_password)
         st.session_state["public_invite_url"] = build_invite_url(token)
         st.session_state["public_invite_token"] = token
         st.session_state["public_room"] = room
         st.session_state["public_invite_display_until"] = now_epoch() + 60
-        st.success("Room berhasil dibuat. Link hanya ditampilkan 1 menit, tanpa revoke.")
+        st.success(f"Room otomatis `{room}` berhasil dibuat. Link hanya ditampilkan 1 menit, tanpa revoke.")
     if st.session_state.get("public_invite_url"):
         col1, col2 = st.columns(2)
         with col1:
