@@ -135,10 +135,15 @@ CSS = """
   background-size:42px 42px;
   mask-image:linear-gradient(to bottom, rgba(0,0,0,.7), transparent 72%);
 }
-.block-container{max-width:940px;padding:1.4rem 1rem 2.4rem;}
+.block-container{max-width:860px;padding:.75rem .85rem 1.4rem;}
+[data-testid="stVerticalBlock"]{gap:.55rem!important;}
+[data-testid="stHorizontalBlock"]{gap:.55rem!important;}
+[data-testid="stExpander"]{border-radius:18px!important;background:linear-gradient(145deg,var(--glass),var(--glass-soft))!important;border:1px solid var(--line)!important;}
+[data-testid="stExpander"] summary{padding:.55rem .8rem!important;}
+.stSlider{padding-top:0!important;}
 html,body,.stApp,.stMarkdown,p,span,label,div,[data-testid="stWidgetLabel"],[data-testid="stMarkdownContainer"]{color:var(--text)!important;}
 h1,h2,h3,h4,h5,h6{color:var(--text-strong)!important;letter-spacing:-.035em;}
-h1{font-size:2.15rem!important;margin-bottom:.15rem!important;}
+h1{font-size:1.55rem!important;margin:.05rem 0!important;}
 a{color:var(--primary)!important;text-decoration:none!important;}
 [data-testid="stSidebar"]{
   background:linear-gradient(180deg,var(--glass-strong),var(--glass))!important;
@@ -186,10 +191,10 @@ a{color:var(--primary)!important;text-decoration:none!important;}
 .card,.element-container:has(.stDataFrame){
   background:linear-gradient(145deg,var(--glass-strong),var(--glass-soft));
   border:1px solid var(--line);
-  border-radius:28px;
-  padding:18px 20px;
+  border-radius:22px;
+  padding:12px 14px;
   box-shadow:var(--shadow),var(--inner);
-  margin:14px 0;
+  margin:9px 0;
   color:var(--text)!important;
   backdrop-filter:blur(26px) saturate(180%);
   -webkit-backdrop-filter:blur(26px) saturate(180%);
@@ -199,10 +204,10 @@ a{color:var(--primary)!important;text-decoration:none!important;}
   overflow:hidden;
   background:linear-gradient(135deg,var(--glass-strong),var(--glass-soft));
   border:1px solid var(--line);
-  border-radius:34px;
-  padding:26px;
+  border-radius:24px;
+  padding:14px 16px;
   box-shadow:var(--shadow),var(--inner);
-  margin-bottom:18px;
+  margin-bottom:10px;
   color:var(--text)!important;
   backdrop-filter:blur(30px) saturate(190%);
   -webkit-backdrop-filter:blur(30px) saturate(190%);
@@ -223,23 +228,23 @@ a{color:var(--primary)!important;text-decoration:none!important;}
   display:inline-flex;
   align-items:center;
   gap:8px;
-  padding:7px 11px;
+  padding:5px 9px;
   border-radius:999px;
   background:linear-gradient(135deg,rgba(255,255,255,.52),var(--primary-soft));
   border:1px solid var(--line);
   color:var(--primary)!important;
-  font-size:.80rem;
+  font-size:.72rem;
   font-weight:800;
   margin-right:8px;
   box-shadow:var(--inner);
 }
-.muted{color:var(--muted)!important;font-size:.94rem;line-height:1.58;}
+.muted{color:var(--muted)!important;font-size:.84rem;line-height:1.38;margin:.15rem 0 0;}
 .danger-box{
   background:linear-gradient(135deg,var(--danger-soft),var(--glass-soft));
   border:1px solid rgba(255,107,99,.46);
-  border-radius:24px;
-  padding:15px 17px;
-  margin:12px 0;
+  border-radius:18px;
+  padding:10px 12px;
+  margin:8px 0;
   color:var(--text)!important;
   box-shadow:var(--inner),0 16px 36px rgba(255,59,48,.10);
   backdrop-filter:blur(22px) saturate(180%);
@@ -283,26 +288,26 @@ CHAT_CSS = """
 }
 html,body{margin:0;background:transparent;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;color:var(--bubble-text);}
 .chat{
-  height:470px;
+  height:390px;
   overflow-y:auto;
-  padding:16px;
+  padding:11px;
   background:
     radial-gradient(circle at 8% 0%, rgba(24,119,242,.16), transparent 26%),
     radial-gradient(circle at 92% 10%, rgba(192,132,252,.18), transparent 28%),
     var(--chat-bg);
   border:1px solid var(--line);
-  border-radius:30px;
+  border-radius:22px;
   box-sizing:border-box;
   box-shadow:var(--shadow),var(--inner);
   backdrop-filter:blur(26px) saturate(180%);
   -webkit-backdrop-filter:blur(26px) saturate(180%);
 }
-.row{display:flex;margin:0 0 11px 0;}
+.row{display:flex;margin:0 0 8px 0;}
 .row.me{justify-content:flex-end;}
 .bubble{
   max-width:76%;
-  padding:12px 14px;
-  border-radius:22px;
+  padding:9px 11px;
+  border-radius:18px;
   background:var(--bubble);
   color:var(--bubble-text);
   border:1px solid var(--line-strong);
@@ -315,11 +320,11 @@ html,body{margin:0;background:transparent;font-family:Inter,system-ui,-apple-sys
 .bubble small{color:var(--muted);}
 .row.me .bubble{background:var(--me);color:var(--me-text);border-color:rgba(255,255,255,.28);}
 .row.me .bubble small{color:rgba(255,255,255,.86);}
-.meta{font-size:11px;color:var(--muted);margin-top:6px;}
+.meta{font-size:10px;color:var(--muted);margin-top:4px;}
 .row.me .meta{color:rgba(255,255,255,.80);}
 .empty{height:100%;display:flex;align-items:center;justify-content:center;color:var(--empty);text-align:center;}
 .packet{display:block;font-weight:800;margin-bottom:4px;color:inherit;}
-.thumb{max-width:min(260px,100%);max-height:190px;border-radius:18px;border:1px solid var(--line);object-fit:contain;display:block;margin-top:8px;background:rgba(255,255,255,.55);box-shadow:0 12px 30px rgba(0,0,0,.12);}
+.thumb{max-width:min(220px,100%);max-height:150px;border-radius:18px;border:1px solid var(--line);object-fit:contain;display:block;margin-top:8px;background:rgba(255,255,255,.55);box-shadow:0 12px 30px rgba(0,0,0,.12);}
 </style>
 """
 
@@ -976,9 +981,9 @@ def render_countdown(label: str, seconds_left: int) -> None:
     safe_label = html.escape(label)
     components.html(
         f"""
-        <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;border:1px solid rgba(255,255,255,.22);border-radius:22px;padding:12px 14px;background:rgba(255,255,255,.10);backdrop-filter:blur(18px);color:inherit">
-          <div style="font-size:12px;opacity:.72;margin-bottom:3px">{safe_label}</div>
-          <div id="countdown" style="font-size:28px;font-weight:800;letter-spacing:-.04em">{format_countdown(seconds_left)}</div>
+        <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;border:1px solid rgba(255,255,255,.22);border-radius:18px;padding:8px 10px;background:rgba(255,255,255,.10);backdrop-filter:blur(18px);color:inherit">
+          <div style="font-size:11px;opacity:.72;margin-bottom:1px">{safe_label}</div>
+          <div id="countdown" style="font-size:21px;font-weight:800;letter-spacing:-.04em">{format_countdown(seconds_left)}</div>
         </div>
         <script>
           let left = {max(0, int(seconds_left))};
@@ -992,7 +997,7 @@ def render_countdown(label: str, seconds_left: int) -> None:
           tick(); setInterval(tick, 1000);
         </script>
         """,
-        height=82,
+        height=60,
     )
 
 
@@ -1040,8 +1045,7 @@ def build_whatsapp_share_url(invite_url: str, room: str | None = None) -> str:
 def render_whatsapp_share(invite_url: str, room: str | None = None) -> None:
     if not invite_url:
         return
-    st.link_button("Bagikan invite via WhatsApp", build_whatsapp_share_url(invite_url, room), use_container_width=True)
-    st.caption("WhatsApp akan terbuka dengan pesan invite otomatis. Pilih kontak/grup tujuan untuk mengirim.")
+    st.link_button("Share WhatsApp", build_whatsapp_share_url(invite_url, room), use_container_width=True)
 
 
 def get_query_param(name: str) -> str | None:
@@ -1189,11 +1193,14 @@ def render_admin_panel() -> None:
 
 def render_public_room_creator() -> None:
     with st.container(border=True):
-        st.subheader("Buat room baru")
-        st.caption("Siapa pun bisa membuat room. Durasi room maksimal 60 menit. Setelah waktu habis, room otomatis hancur dan semua invite link direvoke.")
-        creator = st.text_input("Nama pembuat", placeholder="contoh: adiora", key="creator_name")
-        room = st.text_input("Nama room", placeholder="contoh: kelas-private-01", key="public_room_name")
-        ttl = st.slider("Masa aktif room", min_value=1, max_value=ROOM_MAX_TTL_MINUTES, value=ROOM_DEFAULT_TTL_MINUTES, help="Maksimal 60 menit.", key="public_room_ttl")
+        st.subheader("Buat room")
+        st.caption("Maksimal 60 menit. Auto revoke saat waktu habis.")
+        col_a, col_b = st.columns(2)
+        with col_a:
+            creator = st.text_input("Nama pembuat", placeholder="adiora", key="creator_name")
+        with col_b:
+            room = st.text_input("Nama room", placeholder="kelas-private-01", key="public_room_name")
+        ttl = st.slider("Durasi room", min_value=1, max_value=ROOM_MAX_TTL_MINUTES, value=ROOM_DEFAULT_TTL_MINUTES, help="Maksimal 60 menit.", key="public_room_ttl")
         if st.button("Create room + link", use_container_width=True):
             room = clean_room_name(room)
             if not room:
@@ -1218,27 +1225,27 @@ def render_public_room_creator() -> None:
 
 
 def render_landing() -> None:
-    st.markdown('<div class="hero"><span class="badge">🔐 public create</span><span class="badge">max 60 menit</span><span class="badge">auto revoke</span><h1>AntiTrust</h1><p class="muted">Private chat sederhana dengan room sementara, enkripsi Fernet, invite link, dan auto-revoke saat waktu room habis.</p></div>', unsafe_allow_html=True)
-    st.info("Buat room baru atau masuk memakai invite link. Semua room otomatis berakhir maksimal 60 menit. Nama pengguna dikunci setelah ditetapkan; nama adioranye dan Galuh Adi Insani hanya untuk admin.")
+    st.markdown('<div class="hero"><span class="badge">🔐 secure</span><span class="badge">60 menit</span><span class="badge">auto revoke</span><h1>AntiTrust</h1><p class="muted">Room sementara terenkripsi. Buat link, share, lalu room otomatis direvoke.</p></div>', unsafe_allow_html=True)
+    st.caption("Nama pengguna terkunci setelah ditetapkan. Nama adioranye dan Galuh Adi Insani hanya untuk admin.")
     render_public_room_creator()
     with st.expander("Admin panel", expanded=False):
         render_admin_panel()
 
 
 def render_sidebar() -> tuple[bool, int, bool]:
-    st.sidebar.title("AntiTrust")
+    st.sidebar.title("🔐 AntiTrust")
     auto_refresh = st.sidebar.toggle("Auto refresh", value=True)
     interval = st.sidebar.selectbox("Interval", [3, 5, 10, 15], index=1)
     sound = st.sidebar.toggle("Suara pesan baru", value=True)
-    st.sidebar.caption("Key dan password harus disimpan di Secrets/env, bukan di GitHub.")
+    st.sidebar.caption("Secrets/env only.")
     return auto_refresh, interval, sound
 
 
 def render_room_invite_panel(room: str, username: str) -> None:
-    with st.expander("Buat invite link untuk orang lain", expanded=False):
+    with st.expander("Invite", expanded=False):
         room_left = room_seconds_left(room)
         max_link_minutes = max(1, min(INVITE_MAX_TTL_MINUTES, (room_left + 59) // 60))
-        st.caption("Semua user di room ini bisa membuat link. Link tidak bisa lebih lama dari sisa waktu room dan maksimal 1 jam.")
+        st.caption("Semua user bisa buat link. Maksimal mengikuti sisa waktu room.")
         ttl = st.slider("Masa aktif link", min_value=1, max_value=max_link_minutes, value=min(30, max_link_minutes), key="room_invite_ttl")
         if st.button("Create link", use_container_width=True):
             if room_is_expired(room):
@@ -1261,8 +1268,8 @@ def clear_destroy_countdown() -> None:
 
 
 def render_room_actions(room: str, username: str) -> None:
-    with st.expander("Aksi room", expanded=False):
-        st.caption("Fitur keluar room dinonaktifkan agar identitas tidak bisa direset untuk mengganti nama atau membaca ulang percakapan dengan identitas baru.")
+    with st.expander("Aksi", expanded=False):
+        st.caption("Keluar room dinonaktifkan agar identitas tidak bisa direset.")
 
         pending_room = st.session_state.get("destroy_pending_room")
         countdown_until = int(st.session_state.get("destroy_countdown_until", 0) or 0)
@@ -1303,8 +1310,8 @@ def render_room_actions(room: str, username: str) -> None:
 def render_room_settings(room: str) -> None:
     config = get_room_config(room)
     current = choice_from_minutes(config.get("auto_destroy_minutes"))
-    with st.expander("Pengaturan room"):
-        st.caption("Room tetap otomatis direvoke saat countdown utama habis. Opsi ini hanya mempercepat destroy jika room kosong.")
+    with st.expander("Pengaturan"):
+        st.caption("Opsional: percepat destroy jika room kosong.")
         choice = st.selectbox("Auto-destroy jika room kosong", AUTO_DESTROY_CHOICES, index=AUTO_DESTROY_CHOICES.index(current) if current in AUTO_DESTROY_CHOICES else 3)
         if st.button("Simpan pengaturan", use_container_width=True):
             config["auto_destroy_minutes"] = parse_destroy_choice(choice)
@@ -1313,7 +1320,7 @@ def render_room_settings(room: str) -> None:
 
 
 def render_panic(room: str) -> None:
-    st.markdown('<div class="danger-box"><b>Panic Destroy</b><br><span class="muted">Menghapus semua pesan dan packet di room aktif.</span></div>', unsafe_allow_html=True)
+    st.markdown('<div class="danger-box"><b>Panic Destroy</b> <span class="muted">hapus semua pesan/packet room aktif.</span></div>', unsafe_allow_html=True)
     confirm = st.checkbox("Saya paham tindakan ini menghapus pesan room aktif")
     if st.button("Panic destroy sekarang", type="primary", use_container_width=True, disabled=not confirm):
         count = panic_destroy(room)
@@ -1323,15 +1330,15 @@ def render_panic(room: str) -> None:
 
 def render_message_form(room: str, username: str) -> None:
     with st.container(border=True):
-        st.subheader("Kirim pesan")
+        st.subheader("Pesan")
         with st.form("text-message", clear_on_submit=True):
-            message = st.text_area("Pesan", placeholder="Tulis pesan terenkripsi...", height=90, max_chars=MAX_TEXT_LENGTH)
+            message = st.text_area("Pesan", placeholder="Tulis pesan terenkripsi...", height=68, max_chars=MAX_TEXT_LENGTH)
             submitted = st.form_submit_button("Kirim pesan", use_container_width=True)
             if submitted:
                 if not rate_limited("text"):
                     append_text(room, username, message)
                     st.rerun()
-        tab_img, tab_voice, tab_doc = st.tabs(["Image", "Voice", "Document"])
+        tab_img, tab_voice, tab_doc = st.tabs(["🖼️ Image", "🎙️ Voice", "📎 Doc"])
         with tab_img:
             image = st.file_uploader("Image", type=list(ALLOWED_IMAGE_TYPES))
             if st.button("Kirim image", use_container_width=True):
@@ -1381,7 +1388,7 @@ def main() -> None:
         render_landing()
         return
 
-    st.markdown('<div class="hero"><span class="badge">🔐 room aktif</span><span class="badge">max 60 menit</span><span class="badge">auto revoke</span><h1>AntiTrust Room</h1><p class="muted">Pesan teks dan packet disimpan terenkripsi. Saat countdown room habis, room dihancurkan dan semua invite link direvoke.</p></div>', unsafe_allow_html=True)
+    st.markdown('<div class="hero"><span class="badge">🔐 aktif</span><span class="badge">60 menit</span><span class="badge">auto revoke</span><h1>AntiTrust Room</h1></div>', unsafe_allow_html=True)
     current_invite_left = invite_seconds_left(invite_token)
     col_timer1, col_timer2 = st.columns(2)
     with col_timer1:
@@ -1399,13 +1406,13 @@ def main() -> None:
     active_users = update_online(room, username)
     messages = load_messages(room)
     config = get_room_config(room)
-    st.caption(f"User: {username} · Peers aktif: {len(active_users)} · Room berakhir dalam: {format_countdown(room_seconds_left(room))} · Auto-destroy kosong: {choice_from_minutes(config.get('auto_destroy_minutes'))}")
+    st.caption(f"{username} · {len(active_users)} aktif · sisa {format_countdown(room_seconds_left(room))} · kosong: {choice_from_minutes(config.get('auto_destroy_minutes'))}")
     render_room_invite_panel(room, username)
     render_room_actions(room, username)
     render_room_settings(room)
     render_panic(room)
     render_sound_notice(latest_foreign_signature(messages, username), sound)
-    components.html(render_chat(messages, username), height=500, scrolling=False)
+    components.html(render_chat(messages, username), height=410, scrolling=False)
     render_packet_viewer(room, messages)
     render_message_form(room, username)
 
