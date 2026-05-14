@@ -1236,12 +1236,35 @@ def render_room_invite_panel(room: str, username: str) -> None:
             render_countdown("Sisa waktu invite link", invite_seconds_left(st.session_state.get("room_invite_token")))
 
 
+def clear_destroy_countdown() -> None:
+    for key in ("destroy_pending_room", "destroy_countdown_until"):
+        st.session_state.pop(key, None)
+
+
 def render_room_actions(room: str, username: str) -> None:
     with st.expander("Aksi room", expanded=False):
         st.caption("Fitur keluar room dinonaktifkan agar identitas tidak bisa direset untuk mengganti nama atau membaca ulang percakapan dengan identitas baru.")
-        confirm = st.checkbox("Saya paham: room, pesan, packet, dan invite link akan dihancurkan", key="destroy_room_confirm")
-        if st.button("Hancurkan room + revoke key", type="primary", use_container_width=True, disabled=not confirm):
+
+        pending_room = st.session_state.get("destroy_pending_room")
+        countdown_until = int(st.session_state.get("destroy_countdown_until", 0) or 0)
+
+        if pending_room == room and countdown_until:
+            remaining = max(0, countdown_until - now_epoch())
+            if remaining > 0:
+                st.warning(f"Room akan dihancurkan dalam {remaining} detik. Tekan cancel untuk membatalkan.")
+                st.progress(max(0.0, min(1.0, (3 - remaining) / 3)))
+                if st.button("Cancel destroy", use_container_width=True):
+                    clear_destroy_countdown()
+                    st.info("Destroy room dibatalkan.")
+                    st.rerun()
+                if st_autorefresh:
+                    st_autorefresh(interval=1000, limit=4, key="destroy_room_countdown_tick")
+                else:
+                    components.html("<script>setTimeout(function(){window.parent.location.reload();},1000);</script>", height=0)
+                return
+
             count, revoked = destroy_room_and_revoke(room)
+            clear_destroy_countdown()
             st.session_state.pop("room_invite_url", None)
             st.session_state.pop("room_invite_token", None)
             try:
@@ -1249,6 +1272,12 @@ def render_room_actions(room: str, username: str) -> None:
             except Exception:
                 pass
             st.success(f"Room dihancurkan. {count} pesan/packet dihapus dan {revoked} invite link direvoke.")
+            st.rerun()
+
+        confirm = st.checkbox("Saya paham: room, pesan, packet, dan invite link akan dihancurkan", key="destroy_room_confirm")
+        if st.button("Hancurkan room + revoke key", type="primary", use_container_width=True, disabled=not confirm):
+            st.session_state["destroy_pending_room"] = room
+            st.session_state["destroy_countdown_until"] = now_epoch() + 3
             st.rerun()
 
 
