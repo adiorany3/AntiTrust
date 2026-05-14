@@ -387,6 +387,27 @@ iframe[title="st.iframe"]{display:block!important;}
 .stTextInput input,.stTextArea textarea,.stNumberInput input{min-height:34px!important;}
 [data-testid="stWidgetLabel"]{font-size:.82rem!important;}
 .stMarkdown p{margin-bottom:.2rem!important;}
+
+
+/* hacker terminal landing */
+.terminal-hero{
+  position:relative;overflow:hidden;border:1px solid rgba(0,255,102,.45);border-radius:20px;padding:16px 18px;margin:6px 0 12px;
+  background:linear-gradient(rgba(0,255,102,.055) 1px, transparent 1px),radial-gradient(circle at 20% 0%, rgba(0,255,102,.18), transparent 32%),radial-gradient(circle at 90% 20%, rgba(24,119,242,.13), transparent 34%),rgba(0,0,0,.86);
+  background-size:100% 4px, auto, auto, auto;color:#9cffb8!important;box-shadow:0 0 34px rgba(0,255,102,.15), inset 0 0 38px rgba(0,255,102,.06);
+  font-family:'SFMono-Regular','Consolas','Liberation Mono',monospace;
+}
+.terminal-hero::before{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(90deg, transparent, rgba(0,255,102,.07), transparent);transform:translateX(-100%);animation:terminal-scan 3.8s linear infinite;}
+@keyframes terminal-scan{to{transform:translateX(100%);}}
+.terminal-kicker{font-size:.74rem;font-weight:900;color:#00ff66!important;letter-spacing:.08em;text-transform:uppercase;margin-bottom:5px;}
+.terminal-hero h1{font-size:1.55rem!important;margin:0!important;color:#d7ffe2!important;text-shadow:0 0 18px rgba(0,255,102,.45);font-family:inherit;}
+.terminal-hero .muted{display:block!important;color:#9cffb8!important;opacity:.92;font-family:inherit;font-size:.82rem!important;margin-top:5px!important;}
+.terminal-cursor{display:inline-block;width:9px;height:1.05em;background:#00ff66;margin-left:5px;vertical-align:-2px;animation:terminal-blink .85s steps(2,start) infinite;box-shadow:0 0 10px rgba(0,255,102,.9);}
+@keyframes terminal-blink{50%{opacity:0;}}
+.terminal-card{border:1px solid rgba(0,255,102,.35)!important;border-radius:20px;padding:13px 14px;background:linear-gradient(180deg, rgba(0,0,0,.82), rgba(3,18,10,.78))!important;box-shadow:0 0 30px rgba(0,255,102,.10), inset 0 1px 0 rgba(255,255,255,.08)!important;color:#d7ffe2!important;}
+.terminal-card h3,.terminal-card p,.terminal-card span,.terminal-card label{color:#d7ffe2!important;}
+.terminal-card [data-testid="stWidgetLabel"]{color:#9cffb8!important;font-family:'SFMono-Regular','Consolas','Liberation Mono',monospace;}
+.terminal-card input{font-family:'SFMono-Regular','Consolas','Liberation Mono',monospace!important;}
+.terminal-note{font-family:'SFMono-Regular','Consolas','Liberation Mono',monospace;color:#00ff66!important;font-size:.78rem;margin-bottom:8px;opacity:.9;}
 </style>
 """
 
@@ -2049,51 +2070,54 @@ def render_admin_panel() -> None:
 
 
 def render_public_room_creator() -> None:
-    with st.container(border=True):
-        st.subheader("Buat room")
-        st.caption("Room tetap mengikuti durasi yang dipilih. Link hanya ditampilkan 1 menit, tanpa revoke.")
-        col_a, col_b = st.columns(2)
-        with col_a:
-            creator = st.text_input("Nama pembuat", placeholder="NamaUnik", key="creator_name")
-        with col_b:
-            room = st.text_input("Nama room", placeholder="kelas-private-01", key="public_room_name")
-        creator_password = st.text_input("Password pembuat room", type="password", help="Password ini dipakai pembuat room untuk revoke room dan hapus chat.", key="public_creator_room_password")
-        ttl = st.slider("Durasi room", min_value=1, max_value=ROOM_MAX_TTL_MINUTES, value=ROOM_DEFAULT_TTL_MINUTES, help="Maksimal 60 menit. Tampilan link hilang otomatis setelah 1 menit, tanpa revoke.", key="public_room_ttl")
-        if st.button("Create room + link", use_container_width=True):
-            room = clean_room_name(room)
-            if not room:
-                st.warning("Nama room tidak boleh kosong.")
-                return
-            creator_name = validate_display_name(creator or "public", is_admin=bool(st.session_state.get("admin_ok")), field_label="Nama pembuat")
-            if creator_name is None:
-                return
-            if len(str(creator_password or "").strip()) < 4:
-                st.warning("Password pembuat room minimal 4 karakter.")
-                return
-            token = create_room_with_invite(room, int(ttl), creator_name, creator_password)
-            st.session_state["public_invite_url"] = build_invite_url(token)
-            st.session_state["public_invite_token"] = token
-            st.session_state["public_room"] = room
-            st.session_state["public_invite_display_until"] = now_epoch() + 60
-            st.success("Room berhasil dibuat. Link hanya ditampilkan 1 menit, tanpa revoke.")
-        if st.session_state.get("public_invite_url"):
-            col1, col2 = st.columns(2)
-            with col1:
-                render_temporary_invite_link(
-                    url_key="public_invite_url",
-                    token_key="public_invite_token",
-                    room_key="public_room",
-                    display_until_key="public_invite_display_until",
-                    input_key="public_invite_box",
-                    label="Link hilang dari halaman dalam",
-                )
-            with col2:
-                render_countdown("Sisa waktu room", room_seconds_left(st.session_state.get("public_room")))
+    st.markdown('<div class="terminal-card">', unsafe_allow_html=True)
+    st.markdown('<div class="terminal-note">$ create_room --anonymous --temporary-link</div>', unsafe_allow_html=True)
+    st.subheader("Buat room")
+    st.caption("Tidak perlu nama pembuat. Room tetap mengikuti durasi yang dipilih. Link hanya tampil 1 menit, tanpa revoke.")
+    room = st.text_input("Nama room", placeholder="kelas-private-01", key="public_room_name")
+    creator_password = st.text_input("Password pembuat room", type="password", help="Password ini dipakai pembuat room untuk revoke room dan hapus chat.", key="public_creator_room_password")
+    ttl = st.slider("Durasi room", min_value=1, max_value=ROOM_MAX_TTL_MINUTES, value=ROOM_DEFAULT_TTL_MINUTES, help="Maksimal 60 menit. Tampilan link hilang otomatis setelah 1 menit, tanpa revoke.", key="public_room_ttl")
+    if st.button("Create room + link", use_container_width=True):
+        room = clean_room_name(room)
+        if not room:
+            st.warning("Nama room tidak boleh kosong.")
+            st.markdown('</div>', unsafe_allow_html=True)
+            return
+        if len(str(creator_password or "").strip()) < 4:
+            st.warning("Password pembuat room minimal 4 karakter.")
+            st.markdown('</div>', unsafe_allow_html=True)
+            return
+        token = create_room_with_invite(room, int(ttl), "anonymous", creator_password)
+        st.session_state["public_invite_url"] = build_invite_url(token)
+        st.session_state["public_invite_token"] = token
+        st.session_state["public_room"] = room
+        st.session_state["public_invite_display_until"] = now_epoch() + 60
+        st.success("Room berhasil dibuat. Link hanya ditampilkan 1 menit, tanpa revoke.")
+    if st.session_state.get("public_invite_url"):
+        col1, col2 = st.columns(2)
+        with col1:
+            render_temporary_invite_link(
+                url_key="public_invite_url",
+                token_key="public_invite_token",
+                room_key="public_room",
+                display_until_key="public_invite_display_until",
+                input_key="public_invite_box",
+                label="Link hilang dari halaman dalam",
+            )
+        with col2:
+            render_countdown("Sisa waktu room", room_seconds_left(st.session_state.get("public_room")))
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 def render_landing() -> None:
-    st.markdown('<div class="hero"><span class="badge">🔐 secure</span><span class="badge">60 menit</span><span class="badge">link 1 menit</span><h1>AntiTrust</h1><p class="muted">Room terenkripsi sementara. Link disembunyikan otomatis tanpa revoke.</p></div>', unsafe_allow_html=True)
-    st.caption("Ruang bebas berbicara, namun harus tetap bertanggungjawab")
+    st.markdown(
+        """<div class="terminal-hero">
+            <div class="terminal-kicker">root@antitrust:~# encrypted room gateway</div>
+            <h1>AntiTrust<span class="terminal-cursor"></span></h1>
+            <p class="muted">Mode terminal aktif. Buat room sementara, salin invite sekali klik, lalu link menghilang dari halaman tanpa revoke.</p>
+        </div>""",
+        unsafe_allow_html=True,
+    )
     render_public_room_creator()
     with st.expander("Admin panel", expanded=False):
         render_admin_panel()
