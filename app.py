@@ -54,9 +54,9 @@ ONLINE_ACTIVE_SECONDS = 25
 DEFAULT_DESTROY_MINUTES = 30
 AUTO_DESTROY_CHOICES = ["5 menit", "10 menit", "20 menit", "30 menit", "60 menit"]
 MESSAGE_RATE_LIMIT_SECONDS = 1.5
-INVITE_DEFAULT_TTL_MINUTES = 1
+INVITE_DEFAULT_TTL_MINUTES = 60
 INVITE_MAX_TTL_MINUTES = 60
-ROOM_DEFAULT_TTL_MINUTES = 1
+ROOM_DEFAULT_TTL_MINUTES = 60
 MESSAGE_SELF_DESTRUCT_CHOICES = {
     "Sampai room berakhir": 0,
     "1 menit": 60,
@@ -1453,12 +1453,93 @@ def clear_invite_display(*keys: str) -> None:
         st.session_state.pop(key, None)
 
 
+
+
+def render_hide_link_redirect(seconds_left: int) -> None:
+    """Reload landing after display-only countdown ends. This does not revoke invite/room."""
+    left = max(0, int(seconds_left))
+    if left <= 0:
+        return
+    components.html(
+        f"""
+        <script>
+        (function(){{
+          const delay = Math.max(1, {left}) * 1000 + 350;
+          setTimeout(function(){{
+            try {{
+              const url = new URL(window.parent.location.href);
+              url.search = '';
+              url.hash = '';
+              window.parent.location.replace(url.toString());
+            }} catch(e) {{
+              window.parent.location.reload();
+            }}
+          }}, delay);
+        }})();
+        </script>
+        """,
+        height=0,
+    )
+
+
+def render_temporary_invite_link(
+    *,
+    url_key: str,
+    token_key: str,
+    room_key: str | None = None,
+    display_until_key: str,
+    input_key: str,
+    label: str = "Link hilang dari halaman dalam",
+) -> bool:
+    """Show invite link for 1 minute only in the UI; do not revoke token or room."""
+    invite_url = st.session_state.get(url_key)
+    token = st.session_state.get(token_key)
+    if not invite_url or not token:
+        return False
+
+    display_until = int(st.session_state.get(display_until_key, 0) or 0)
+    if display_until <= 0:
+        display_until = now_epoch() + 60
+        st.session_state[display_until_key] = display_until
+
+    display_left = max(0, display_until - now_epoch())
+    if display_left <= 0:
+        keys = [url_key, token_key, display_until_key]
+        if room_key:
+            keys.append(room_key)
+        clear_invite_display(*keys)
+        try:
+            st.query_params.clear()
+        except Exception:
+            pass
+        st.toast("Tampilan link sudah disembunyikan. Room/link tidak direvoke.")
+        st.rerun()
+
+    actual_left = invite_seconds_left(token)
+    if actual_left <= 0:
+        keys = [url_key, token_key, display_until_key]
+        if room_key:
+            keys.append(room_key)
+        clear_invite_display(*keys)
+        st.toast("Invite link sudah habis sesuai durasi aslinya.")
+        st.rerun()
+
+    room_name = st.session_state.get(room_key) if room_key else None
+    st.text_input("Invite link", value=invite_url, key=input_key)
+    render_whatsapp_share(invite_url, room_name)
+    with st.expander("QR Invite", expanded=False):
+        render_qr_invite(invite_url)
+    render_countdown(label, display_left)
+    st.caption(f"Catatan: ini hanya menyembunyikan tampilan link setelah 1 menit. Invite asli masih aktif sampai {format_countdown(actual_left)} atau sampai room berakhir.")
+    render_hide_link_redirect(display_left)
+    return True
+
 def force_landing_on_expired_invite() -> None:
     """Clear invite query/state and return to the landing page."""
     clear_invite_display(
         "room_invite_url", "room_invite_token",
-        "public_invite_url", "public_invite_token", "public_room",
-        "last_invite", "last_invite_token", "last_room",
+        "public_invite_url", "public_invite_token", "public_room", "public_invite_display_until",
+        "last_invite", "last_invite_token", "last_room", "last_invite_display_until",
     )
     try:
         st.query_params.clear()
@@ -1530,54 +1611,6 @@ def render_countdown(label: str, seconds_left: int) -> None:
     )
 
 
-def render_home_redirect_countdown(seconds_left: int, label: str = "Halaman kembali otomatis") -> None:
-    """Show a 1-minute client countdown and redirect to the clean landing page when it ends."""
-    left = max(0, int(seconds_left))
-    safe_label = html.escape(label)
-    safe_id = "home_redirect_" + hashlib.sha1(f"home:{label}:{seconds_left}:{time.time_ns()}".encode()).hexdigest()[:12]
-    components.html(
-        f"""
-        <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;border:1px solid rgba(255,107,99,.46);border-radius:15px;padding:7px 10px;background:rgba(255,107,99,.12);backdrop-filter:blur(18px);color:inherit;margin-top:6px">
-          <div style="font-size:11px;opacity:.82;margin-bottom:1px">{safe_label}</div>
-          <div style="font-size:13px;font-weight:700">Link akan ditutup dalam <span id="{safe_id}">{format_countdown(left)}</span></div>
-        </div>
-        <script>
-        (function() {{
-          let left = {left};
-          const el = document.getElementById('{safe_id}');
-          function render() {{
-            if (el) {{
-              const m = Math.floor(Math.max(left, 0) / 60).toString().padStart(2, '0');
-              const s = (Math.max(left, 0) % 60).toString().padStart(2, '0');
-              el.textContent = `${{m}}:${{s}}`;
-            }}
-          }}
-          function goHome() {{
-            try {{
-              const url = new URL(window.parent.location.href);
-              url.search = '?home=1';
-              url.hash = '';
-              window.parent.location.replace(url.toString());
-            }} catch(e) {{
-              window.parent.location.href = '/?home=1';
-            }}
-          }}
-          render();
-          const timer = setInterval(function() {{
-            left -= 1;
-            render();
-            if (left <= 0) {{
-              clearInterval(timer);
-              goHome();
-            }}
-          }}, 1000);
-        }})();
-        </script>
-        """,
-        height=62,
-    )
-
-
 def resolve_invite(token: str | None) -> str | None:
     if not token:
         return None
@@ -1614,7 +1647,7 @@ def build_whatsapp_share_url(invite_url: str, room: str | None = None) -> str:
     room_label = f" untuk room {room}" if room else ""
     text = (
         f"Masuk ke AntiTrust{room_label}: {invite_url}\n\n"
-        "Catatan: link dan room bersifat sementara, aktif 1 menit."
+        "Catatan: link dan room bersifat sementara, maksimal aktif 60 menit."
     )
     return "https://wa.me/?" + urlencode({"text": text})
 
@@ -1844,29 +1877,28 @@ def render_admin_panel() -> None:
 
         st.success("Admin aktif")
         room = st.text_input("Nama room tujuan", placeholder="kelas-private-01")
-        ttl = 1
-        st.info("Room dan invite link otomatis aktif 1 menit, lalu kembali ke halaman awal agar link tidak terbuka terus.")
+        ttl = st.slider("Masa aktif room & invite link", min_value=1, max_value=ROOM_MAX_TTL_MINUTES, value=ROOM_DEFAULT_TTL_MINUTES, help="Maksimal 1 jam. Tampilan link hanya muncul 1 menit setelah dibuat, tanpa revoke.")
         if st.button("Buat room + invite link", use_container_width=True):
             room = clean_room_name(room)
             if not room:
                 st.warning("Nama room tidak boleh kosong.")
             else:
-                token = create_room_with_invite(room, 1, "admin")
+                token = create_room_with_invite(room, int(ttl), "admin")
                 st.session_state["last_invite"] = build_invite_url(token)
                 st.session_state["last_invite_token"] = token
                 st.session_state["last_room"] = room
-                st.success("Room dan invite link berhasil dibuat.")
-        if render_expiring_invite_link(
+                st.session_state["last_invite_display_until"] = now_epoch() + 60
+                st.success("Room dan invite link berhasil dibuat. Link hanya ditampilkan 1 menit, tanpa revoke.")
+        if render_temporary_invite_link(
             url_key="last_invite",
             token_key="last_invite_token",
             room_key="last_room",
+            display_until_key="last_invite_display_until",
             input_key="admin_invite_box",
-            label="Sisa waktu link",
+            label="Link hilang dari halaman dalam",
         ):
             if st.session_state.get("last_room"):
-                admin_left = room_seconds_left(st.session_state.get("last_room"))
-                render_countdown("Sisa waktu room", admin_left)
-                render_home_redirect_countdown(min(invite_seconds_left(st.session_state.get("last_invite_token")), admin_left), "Kembali ke halaman awal")
+                render_countdown("Sisa waktu room", room_seconds_left(st.session_state.get("last_room")))
         if st.button("Logout admin", use_container_width=True):
             st.session_state.pop("admin_ok", None)
             st.rerun()
@@ -1875,14 +1907,13 @@ def render_admin_panel() -> None:
 def render_public_room_creator() -> None:
     with st.container(border=True):
         st.subheader("Buat room")
-        st.caption("Room otomatis aktif 1 menit. Setelah waktu habis, link ditutup dan halaman kembali ke awal.")
+        st.caption("Room tetap mengikuti durasi yang dipilih. Link hanya ditampilkan 1 menit, tanpa revoke.")
         col_a, col_b = st.columns(2)
         with col_a:
             creator = st.text_input("Nama pembuat", placeholder="NamaUnik", key="creator_name")
         with col_b:
             room = st.text_input("Nama room", placeholder="kelas-private-01", key="public_room_name")
-        ttl = 1
-        st.info("Room baru akan aktif selama 1 menit saja untuk mencegah link terbuka terus.")
+        ttl = st.slider("Durasi room", min_value=1, max_value=ROOM_MAX_TTL_MINUTES, value=ROOM_DEFAULT_TTL_MINUTES, help="Maksimal 60 menit. Tampilan link hilang otomatis setelah 1 menit, tanpa revoke.", key="public_room_ttl")
         if st.button("Create room + link", use_container_width=True):
             room = clean_room_name(room)
             if not room:
@@ -1891,34 +1922,29 @@ def render_public_room_creator() -> None:
             creator_name = validate_display_name(creator or "public", is_admin=bool(st.session_state.get("admin_ok")), field_label="Nama pembuat")
             if creator_name is None:
                 return
-            token = create_room_with_invite(room, 1, creator_name)
+            token = create_room_with_invite(room, int(ttl), creator_name)
             st.session_state["public_invite_url"] = build_invite_url(token)
             st.session_state["public_invite_token"] = token
             st.session_state["public_room"] = room
-            st.success("Room berhasil dibuat.")
+            st.session_state["public_invite_display_until"] = now_epoch() + 60
+            st.success("Room berhasil dibuat. Link hanya ditampilkan 1 menit, tanpa revoke.")
         if st.session_state.get("public_invite_url"):
-            left = invite_seconds_left(st.session_state.get("public_invite_token"))
-            if left <= 0:
-                clear_invite_display("public_invite_url", "public_invite_token", "public_room")
-                st.toast("Invite link sudah habis dan halaman kembali ke awal.")
-                st.rerun()
             col1, col2 = st.columns(2)
             with col1:
-                render_expiring_invite_link(
+                render_temporary_invite_link(
                     url_key="public_invite_url",
                     token_key="public_invite_token",
                     room_key="public_room",
+                    display_until_key="public_invite_display_until",
                     input_key="public_invite_box",
-                    label="Sisa waktu link",
+                    label="Link hilang dari halaman dalam",
                 )
             with col2:
-                public_room_left = room_seconds_left(st.session_state.get("public_room"))
-                render_countdown("Sisa waktu room", public_room_left)
-            render_home_redirect_countdown(min(left, public_room_left), "Kembali ke halaman awal")
+                render_countdown("Sisa waktu room", room_seconds_left(st.session_state.get("public_room")))
 
 
 def render_landing() -> None:
-    st.markdown('<div class="hero"><span class="badge">🔐 secure</span><span class="badge">1 menit</span><span class="badge">auto revoke</span><h1>AntiTrust</h1><p class="muted">Room terenkripsi sementara. Share link, auto revoke.</p></div>', unsafe_allow_html=True)
+    st.markdown('<div class="hero"><span class="badge">🔐 secure</span><span class="badge">60 menit</span><span class="badge">link 1 menit</span><h1>AntiTrust</h1><p class="muted">Room terenkripsi sementara. Link disembunyikan otomatis tanpa revoke.</p></div>', unsafe_allow_html=True)
     st.caption("Ruang bebas berbicara, namun harus tetap bertanggungjawab")
     render_public_room_creator()
     with st.expander("Admin panel", expanded=False):
@@ -2431,12 +2457,11 @@ def render_invite_expiry_redirect(seconds_left: int) -> None:
           setTimeout(function(){{
             try {{
               const url = new URL(window.parent.location.href);
-              url.search = '?home=1';
-              url.hash = '';
-              window.parent.location.replace(url.toString());
-            }} catch(e) {{
-              window.parent.location.href = '/?home=1';
-            }}
+              if (url.searchParams.has('invite')) {{
+                url.searchParams.delete('invite');
+                window.parent.location.href = url.origin + url.pathname + (url.search ? url.search : '');
+              }}
+            }} catch(e) {{}}
           }}, delay);
         }})();
         </script>
@@ -2449,8 +2474,6 @@ def main() -> None:
     ensure_dirs()
     st.set_page_config(page_title=APP_TITLE, page_icon=APP_ICON, layout="centered")
     st.markdown(CSS, unsafe_allow_html=True)
-    if get_query_param("home"):
-        force_landing_on_expired_invite()
     destroyed = purge_inactive_rooms()
     auto_refresh, interval, sound = render_sidebar()
     if destroyed:
@@ -2471,7 +2494,7 @@ def main() -> None:
         return
     if room_is_expired(room):
         destroy_room_and_revoke(room)
-        st.error("Room sudah melewati batas waktu 1 menit dan otomatis direvoke.")
+        st.error("Room sudah melewati batas waktu 60 menit dan otomatis direvoke.")
         render_landing()
         return
 
@@ -2480,7 +2503,7 @@ def main() -> None:
         st.toast("Invite link sudah habis. Kembali ke halaman awal.")
         force_landing_on_expired_invite()
 
-    st.markdown('<div class="hero"><span class="badge">🔐 aktif</span><span class="badge">1 menit</span><span class="badge">auto revoke</span><h1>AntiTrust Room</h1></div>', unsafe_allow_html=True)
+    st.markdown('<div class="hero"><span class="badge">🔐 aktif</span><span class="badge">60 menit</span><span class="badge">auto revoke</span><h1>AntiTrust Room</h1></div>', unsafe_allow_html=True)
     col_timer1, col_timer2 = st.columns(2)
     with col_timer1:
         render_countdown("Sisa waktu room", room_seconds_left(room))
