@@ -46,9 +46,12 @@ MAX_TEXT_LENGTH = 2000
 MAX_MEDIA_BYTES = 10 * 1024 * 1024
 ONLINE_ACTIVE_SECONDS = 25
 DEFAULT_DESTROY_MINUTES = 30
-AUTO_DESTROY_CHOICES = ["Never", "10 menit", "20 menit", "30 menit", "60 menit"]
+AUTO_DESTROY_CHOICES = ["5 menit", "10 menit", "20 menit", "30 menit", "60 menit"]
 MESSAGE_RATE_LIMIT_SECONDS = 1.5
-INVITE_DEFAULT_TTL_HOURS = 24
+INVITE_DEFAULT_TTL_MINUTES = 60
+INVITE_MAX_TTL_MINUTES = 60
+ROOM_DEFAULT_TTL_MINUTES = 60
+ROOM_MAX_TTL_MINUTES = 60
 
 ALLOWED_IMAGE_TYPES = {"png", "jpg", "jpeg", "webp"}
 ALLOWED_AUDIO_TYPES = {"wav", "mp3", "ogg", "m4a", "aac", "flac", "webm"}
@@ -597,22 +600,45 @@ def delete_room_packets(room: str) -> None:
     shutil.rmtree(packet_room_dir(room), ignore_errors=True)
 
 
-def parse_destroy_choice(choice: str) -> int | None:
-    return None if choice == "Never" else int(choice.split()[0])
+def parse_destroy_choice(choice: str) -> int:
+    minutes = int(choice.split()[0])
+    return min(max(1, minutes), ROOM_MAX_TTL_MINUTES)
 
 
 def choice_from_minutes(minutes: int | None) -> str:
-    return "Never" if minutes is None else f"{minutes} menit"
+    if minutes is None:
+        return f"{DEFAULT_DESTROY_MINUTES} menit"
+    return f"{int(minutes)} menit"
+
+
+def clean_room_name(room: str) -> str:
+    clean = " ".join(room.strip().split())[:80]
+    return clean
+
+
+def clamp_minutes(value: int, maximum: int = ROOM_MAX_TTL_MINUTES) -> int:
+    return min(max(1, int(value)), int(maximum))
 
 
 def get_room_config(room: str) -> dict[str, Any]:
     settings = load_json(ROOM_SETTINGS_FILE)
     key = room_key(room)
     config = settings.get(key, {}) if isinstance(settings.get(key), dict) else {}
+    created_at = int(config.get("created_at", now_epoch()))
+    expires_at = int(config.get("expires_at", created_at + ROOM_DEFAULT_TTL_MINUTES * 60))
     minutes = config.get("auto_destroy_minutes", DEFAULT_DESTROY_MINUTES)
-    if minutes not in {None, 10, 20, 30, 60}:
+    if minutes not in {5, 10, 20, 30, 60}:
         minutes = DEFAULT_DESTROY_MINUTES
-    return {"auto_destroy_minutes": minutes, "last_active_at": int(config.get("last_active_at", now_epoch()))}
+    return {
+        "room_key": key,
+        "room_cipher": config.get("room_cipher", encrypt_text(room)),
+        "created_by": config.get("created_by", ""),
+        "created_at": created_at,
+        "expires_at": expires_at,
+        "auto_destroy_minutes": int(minutes),
+        "last_active_at": int(config.get("last_active_at", now_epoch())),
+        "destroyed_at": int(config.get("destroyed_at", 0)),
+    }
 
 
 def save_room_config(room: str, config: dict[str, Any]) -> None:
@@ -621,8 +647,49 @@ def save_room_config(room: str, config: dict[str, Any]) -> None:
     atomic_write_json(ROOM_SETTINGS_FILE, settings)
 
 
+def ensure_room_config(room: str, lifetime_minutes: int = ROOM_DEFAULT_TTL_MINUTES, created_by: str = "") -> dict[str, Any]:
+    room = clean_room_name(room)
+    settings = load_json(ROOM_SETTINGS_FILE)
+    key = room_key(room)
+    existing = settings.get(key)
+    now = now_epoch()
+    if isinstance(existing, dict) and int(existing.get("expires_at", 0)) > now and not existing.get("destroyed_at"):
+        config = get_room_config(room)
+        if not config.get("room_cipher"):
+            config["room_cipher"] = encrypt_text(room)
+        settings[key] = config
+        atomic_write_json(ROOM_SETTINGS_FILE, settings)
+        return config
+    lifetime_minutes = clamp_minutes(lifetime_minutes, ROOM_MAX_TTL_MINUTES)
+    config = {
+        "room_key": key,
+        "room_cipher": encrypt_text(room),
+        "created_by": encrypt_text(created_by.strip()[:80]) if created_by else "",
+        "created_at": now,
+        "expires_at": now + lifetime_minutes * 60,
+        "auto_destroy_minutes": min(DEFAULT_DESTROY_MINUTES, lifetime_minutes),
+        "last_active_at": now,
+        "destroyed_at": 0,
+    }
+    settings[key] = config
+    atomic_write_json(ROOM_SETTINGS_FILE, settings)
+    return config
+
+
+def room_seconds_left(room: str) -> int:
+    config = get_room_config(room)
+    return max(0, int(config.get("expires_at", 0)) - now_epoch())
+
+
+def room_is_expired(room: str) -> bool:
+    return room_seconds_left(room) <= 0
+
+
 def mark_room_active(room: str) -> None:
     config = get_room_config(room)
+    if int(config.get("expires_at", 0)) <= now_epoch():
+        destroy_room_and_revoke(room)
+        return
     config["last_active_at"] = now_epoch()
     save_room_config(room, config)
 
@@ -640,6 +707,23 @@ def update_online(room: str, username: str) -> list[str]:
     return [user for user in active if user != username]
 
 
+def revoke_room_invites_by_key(key: str) -> int:
+    invites = load_json(INVITE_FILE)
+    changed = False
+    revoked = 0
+    for item in invites.values():
+        if not isinstance(item, dict) or item.get("revoked"):
+            continue
+        if item.get("room_key") == key:
+            item["revoked"] = True
+            item["revoked_at"] = now_epoch()
+            revoked += 1
+            changed = True
+    if changed:
+        atomic_write_json(INVITE_FILE, invites)
+    return revoked
+
+
 def purge_inactive_rooms() -> int:
     rooms = load_json(CHAT_FILE)
     online = load_json(ONLINE_FILE)
@@ -649,25 +733,30 @@ def purge_inactive_rooms() -> int:
     changed = False
 
     for key, config in list(settings.items()):
-        active = {u: int(ts) for u, ts in online.get(key, {}).items() if now - int(ts) <= ONLINE_ACTIVE_SECONDS}
-        online[key] = active
-        minutes = config.get("auto_destroy_minutes", DEFAULT_DESTROY_MINUTES)
-        if active:
-            config["last_active_at"] = now
-            settings[key] = config
+        if not isinstance(config, dict):
+            settings.pop(key, None)
             changed = True
             continue
-        if minutes is None:
-            settings[key] = config
-            continue
-        last_active = int(config.get("last_active_at", now))
-        if now - last_active >= int(minutes) * 60:
+        active = {u: int(ts) for u, ts in online.get(key, {}).items() if now - int(ts) <= ONLINE_ACTIVE_SECONDS}
+        online[key] = active
+        expires_at = int(config.get("expires_at", now + ROOM_DEFAULT_TTL_MINUTES * 60))
+        minutes = int(config.get("auto_destroy_minutes", DEFAULT_DESTROY_MINUTES))
+        should_destroy = expires_at <= now
+        if not should_destroy and not active:
+            last_active = int(config.get("last_active_at", now))
+            should_destroy = now - last_active >= minutes * 60
+        if should_destroy:
             rooms.pop(key, None)
             online.pop(key, None)
             settings.pop(key, None)
-            # packet directory name uses the same room_key but original room is not stored; remove by key directly.
             shutil.rmtree(PACKET_DIR / key, ignore_errors=True)
+            revoke_room_invites_by_key(key)
             destroyed += 1
+            changed = True
+            continue
+        if active:
+            config["last_active_at"] = now
+            settings[key] = config
             changed = True
 
     if changed:
@@ -751,34 +840,148 @@ def panic_destroy(room: str) -> int:
     return count
 
 
+def leave_room(room: str, username: str) -> None:
+    online = load_json(ONLINE_FILE)
+    key = room_key(room)
+    if isinstance(online.get(key), dict):
+        online[key].pop(username, None)
+        if not online[key]:
+            online.pop(key, None)
+        atomic_write_json(ONLINE_FILE, online)
+
+
+def revoke_room_invites(room: str) -> int:
+    invites = load_json(INVITE_FILE)
+    changed = False
+    revoked = 0
+    key = room_key(room)
+    for item in invites.values():
+        if not isinstance(item, dict) or item.get("revoked"):
+            continue
+        stored_room = decrypt_text(str(item.get("room", ""))).strip()
+        if item.get("room_key") == key or stored_room == room:
+            item["revoked"] = True
+            item["revoked_at"] = now_epoch()
+            revoked += 1
+            changed = True
+    if changed:
+        atomic_write_json(INVITE_FILE, invites)
+    return revoked
+
+
+def destroy_room_and_revoke(room: str) -> tuple[int, int]:
+    rooms = load_json(CHAT_FILE)
+    online = load_json(ONLINE_FILE)
+    settings = load_json(ROOM_SETTINGS_FILE)
+    key = room_key(room)
+    count = len(rooms.get(key, [])) if isinstance(rooms.get(key), list) else 0
+    rooms.pop(key, None)
+    online.pop(key, None)
+    settings.pop(key, None)
+    atomic_write_json(CHAT_FILE, rooms)
+    atomic_write_json(ONLINE_FILE, online)
+    atomic_write_json(ROOM_SETTINGS_FILE, settings)
+    delete_room_packets(room)
+    revoked = revoke_room_invites(room)
+    return count, revoked
+
+
 def token_hash(token: str) -> str:
     return hmac_digest(token)
 
 
-def create_invite(room: str, ttl_hours: int = INVITE_DEFAULT_TTL_HOURS) -> str:
+def create_invite(room: str, ttl_minutes: int = INVITE_DEFAULT_TTL_MINUTES, created_by: str = "") -> str:
+    room = clean_room_name(room)
+    config = ensure_room_config(room, ROOM_DEFAULT_TTL_MINUTES, created_by)
+    room_left_seconds = max(1, int(config.get("expires_at", now_epoch())) - now_epoch())
+    max_ttl_minutes = max(1, min(INVITE_MAX_TTL_MINUTES, (room_left_seconds + 59) // 60))
+    ttl_minutes = clamp_minutes(ttl_minutes, max_ttl_minutes)
     token = secrets.token_urlsafe(32)
     invites = load_json(INVITE_FILE)
     invites[token_hash(token)] = {
         "room": encrypt_text(room),
+        "room_key": room_key(room),
+        "created_by": encrypt_text(created_by.strip()[:80]) if created_by else "",
         "created_at": now_epoch(),
-        "expires_at": now_epoch() + max(1, ttl_hours) * 3600,
+        "expires_at": min(now_epoch() + ttl_minutes * 60, int(config.get("expires_at", now_epoch() + ttl_minutes * 60))),
         "revoked": False,
     }
     atomic_write_json(INVITE_FILE, invites)
     return token
 
 
-def resolve_invite(token: str | None) -> str | None:
+def create_room_with_invite(room: str, lifetime_minutes: int, created_by: str = "") -> str:
+    room = clean_room_name(room)
+    ensure_room_config(room, clamp_minutes(lifetime_minutes, ROOM_MAX_TTL_MINUTES), created_by)
+    return create_invite(room, clamp_minutes(lifetime_minutes, INVITE_MAX_TTL_MINUTES), created_by)
+
+
+def get_invite_item(token: str | None) -> dict[str, Any] | None:
     if not token:
         return None
     invites = load_json(INVITE_FILE)
     item = invites.get(token_hash(token))
+    return item if isinstance(item, dict) else None
+
+
+def invite_seconds_left(token: str | None) -> int:
+    item = get_invite_item(token)
+    if not item or item.get("revoked"):
+        return 0
+    return max(0, int(item.get("expires_at", 0)) - now_epoch())
+
+
+def format_countdown(seconds: int) -> str:
+    seconds = max(0, int(seconds))
+    minutes, sec = divmod(seconds, 60)
+    return f"{minutes:02d}:{sec:02d}"
+
+
+def render_countdown(label: str, seconds_left: int) -> None:
+    safe_label = html.escape(label)
+    components.html(
+        f"""
+        <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;border:1px solid rgba(255,255,255,.22);border-radius:22px;padding:12px 14px;background:rgba(255,255,255,.10);backdrop-filter:blur(18px);color:inherit">
+          <div style="font-size:12px;opacity:.72;margin-bottom:3px">{safe_label}</div>
+          <div id="countdown" style="font-size:28px;font-weight:800;letter-spacing:-.04em">{format_countdown(seconds_left)}</div>
+        </div>
+        <script>
+          let left = {max(0, int(seconds_left))};
+          const el = document.getElementById('countdown');
+          function tick() {{
+            const m = Math.floor(left / 60).toString().padStart(2, '0');
+            const s = (left % 60).toString().padStart(2, '0');
+            el.textContent = `${{m}}:${{s}}`;
+            if (left > 0) left -= 1;
+          }}
+          tick(); setInterval(tick, 1000);
+        </script>
+        """,
+        height=82,
+    )
+
+
+def resolve_invite(token: str | None) -> str | None:
+    if not token:
+        return None
+    invites = load_json(INVITE_FILE)
+    h = token_hash(token)
+    item = invites.get(h)
     if not isinstance(item, dict) or item.get("revoked"):
         return None
-    if int(item.get("expires_at", 0)) < now_epoch():
+    if int(item.get("expires_at", 0)) <= now_epoch():
+        item["revoked"] = True
+        item["revoked_at"] = now_epoch()
+        invites[h] = item
+        atomic_write_json(INVITE_FILE, invites)
         return None
-    room = decrypt_text(str(item.get("room", ""))).strip()
-    return room or None
+    room = clean_room_name(decrypt_text(str(item.get("room", ""))).strip())
+    if not room:
+        return None
+    if room_is_expired(room):
+        destroy_room_and_revoke(room)
+        return None
+    return room
 
 
 def public_base_url() -> str:
@@ -911,25 +1114,59 @@ def render_admin_panel() -> None:
 
         st.success("Admin aktif")
         room = st.text_input("Nama room tujuan", placeholder="kelas-private-01")
-        ttl = st.number_input("Masa aktif invite link (jam)", min_value=1, max_value=168, value=24)
-        if st.button("Buat invite link", use_container_width=True):
-            if not room.strip():
+        ttl = st.slider("Masa aktif room & invite link", min_value=1, max_value=ROOM_MAX_TTL_MINUTES, value=ROOM_DEFAULT_TTL_MINUTES, help="Maksimal 1 jam. Saat waktu habis, room otomatis dihancurkan dan semua invite link direvoke.")
+        if st.button("Buat room + invite link", use_container_width=True):
+            room = clean_room_name(room)
+            if not room:
                 st.warning("Nama room tidak boleh kosong.")
             else:
-                token = create_invite(room.strip(), int(ttl))
+                token = create_room_with_invite(room, int(ttl), "admin")
                 st.session_state["last_invite"] = build_invite_url(token)
-                st.success("Invite link berhasil dibuat.")
+                st.session_state["last_invite_token"] = token
+                st.session_state["last_room"] = room
+                st.success("Room dan invite link berhasil dibuat.")
         if st.session_state.get("last_invite"):
             st.text_input("Invite link", value=st.session_state["last_invite"])
+            render_countdown("Sisa waktu link", invite_seconds_left(st.session_state.get("last_invite_token")))
+            if st.session_state.get("last_room"):
+                render_countdown("Sisa waktu room", room_seconds_left(st.session_state.get("last_room")))
         if st.button("Logout admin", use_container_width=True):
             st.session_state.pop("admin_ok", None)
             st.rerun()
 
 
+def render_public_room_creator() -> None:
+    with st.container(border=True):
+        st.subheader("Buat room baru")
+        st.caption("Siapa pun bisa membuat room. Durasi room maksimal 60 menit. Setelah waktu habis, room otomatis hancur dan semua invite link direvoke.")
+        creator = st.text_input("Nama pembuat", placeholder="contoh: adiora", key="creator_name")
+        room = st.text_input("Nama room", placeholder="contoh: kelas-private-01", key="public_room_name")
+        ttl = st.slider("Masa aktif room", min_value=1, max_value=ROOM_MAX_TTL_MINUTES, value=ROOM_DEFAULT_TTL_MINUTES, help="Maksimal 60 menit.", key="public_room_ttl")
+        if st.button("Create room + link", use_container_width=True):
+            room = clean_room_name(room)
+            if not room:
+                st.warning("Nama room tidak boleh kosong.")
+                return
+            token = create_room_with_invite(room, int(ttl), creator or "public")
+            st.session_state["public_invite_url"] = build_invite_url(token)
+            st.session_state["public_invite_token"] = token
+            st.session_state["public_room"] = room
+            st.success("Room berhasil dibuat.")
+        if st.session_state.get("public_invite_url"):
+            st.text_input("Invite link", value=st.session_state["public_invite_url"], key="public_invite_box")
+            col1, col2 = st.columns(2)
+            with col1:
+                render_countdown("Sisa waktu link", invite_seconds_left(st.session_state.get("public_invite_token")))
+            with col2:
+                render_countdown("Sisa waktu room", room_seconds_left(st.session_state.get("public_room")))
+
+
 def render_landing() -> None:
-    st.markdown('<div class="hero"><span class="badge">🔐 invite only</span><span class="badge">encrypted packets</span><h1>AntiTrust</h1><p class="muted">Private chat sederhana dengan room berbasis invite, enkripsi Fernet, validasi upload, dan auto-destroy saat room tidak aktif.</p></div>', unsafe_allow_html=True)
-    st.info("Masuk memakai invite link. Admin dapat membuat invite link dari panel di bawah.")
-    render_admin_panel()
+    st.markdown('<div class="hero"><span class="badge">🔐 public create</span><span class="badge">max 60 menit</span><span class="badge">auto revoke</span><h1>AntiTrust</h1><p class="muted">Private chat sederhana dengan room sementara, enkripsi Fernet, invite link, dan auto-revoke saat waktu room habis.</p></div>', unsafe_allow_html=True)
+    st.info("Buat room baru atau masuk memakai invite link. Semua room otomatis berakhir maksimal 60 menit.")
+    render_public_room_creator()
+    with st.expander("Admin panel", expanded=False):
+        render_admin_panel()
 
 
 def render_sidebar() -> tuple[bool, int, bool]:
@@ -941,10 +1178,58 @@ def render_sidebar() -> tuple[bool, int, bool]:
     return auto_refresh, interval, sound
 
 
+def render_room_invite_panel(room: str, username: str) -> None:
+    with st.expander("Buat invite link untuk orang lain", expanded=False):
+        room_left = room_seconds_left(room)
+        max_link_minutes = max(1, min(INVITE_MAX_TTL_MINUTES, (room_left + 59) // 60))
+        st.caption("Semua user di room ini bisa membuat link. Link tidak bisa lebih lama dari sisa waktu room dan maksimal 1 jam.")
+        ttl = st.slider("Masa aktif link", min_value=1, max_value=max_link_minutes, value=min(30, max_link_minutes), key="room_invite_ttl")
+        if st.button("Create link", use_container_width=True):
+            if room_is_expired(room):
+                destroy_room_and_revoke(room)
+                st.error("Room sudah kedaluwarsa dan direvoke.")
+                st.rerun()
+            token = create_invite(room, int(ttl), username)
+            st.session_state["room_invite_url"] = build_invite_url(token)
+            st.session_state["room_invite_token"] = token
+            st.success("Invite link dibuat.")
+        if st.session_state.get("room_invite_url"):
+            st.text_input("Invite link", value=st.session_state["room_invite_url"], key="room_invite_url_box")
+            render_countdown("Sisa waktu invite link", invite_seconds_left(st.session_state.get("room_invite_token")))
+
+
+def render_room_actions(room: str, username: str) -> None:
+    with st.expander("Aksi room", expanded=False):
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Tinggalkan room sekarang", use_container_width=True):
+                leave_room(room, username)
+                st.session_state.pop("username", None)
+                try:
+                    st.query_params.clear()
+                except Exception:
+                    pass
+                st.success("Kamu sudah keluar dari room.")
+                st.rerun()
+        with col2:
+            confirm = st.checkbox("Saya paham: room, pesan, packet, dan invite link akan dihancurkan", key="destroy_room_confirm")
+            if st.button("Hancurkan room + revoke key", type="primary", use_container_width=True, disabled=not confirm):
+                count, revoked = destroy_room_and_revoke(room)
+                st.session_state.pop("room_invite_url", None)
+                st.session_state.pop("room_invite_token", None)
+                try:
+                    st.query_params.clear()
+                except Exception:
+                    pass
+                st.success(f"Room dihancurkan. {count} pesan/packet dihapus dan {revoked} invite link direvoke.")
+                st.rerun()
+
+
 def render_room_settings(room: str) -> None:
     config = get_room_config(room)
     current = choice_from_minutes(config.get("auto_destroy_minutes"))
     with st.expander("Pengaturan room"):
+        st.caption("Room tetap otomatis direvoke saat countdown utama habis. Opsi ini hanya mempercepat destroy jika room kosong.")
         choice = st.selectbox("Auto-destroy jika room kosong", AUTO_DESTROY_CHOICES, index=AUTO_DESTROY_CHOICES.index(current) if current in AUTO_DESTROY_CHOICES else 3)
         if st.button("Simpan pengaturan", use_container_width=True):
             config["auto_destroy_minutes"] = parse_destroy_choice(choice)
@@ -1015,18 +1300,35 @@ def main() -> None:
     if not room:
         render_landing()
         return
+    if room_is_expired(room):
+        destroy_room_and_revoke(room)
+        st.error("Room sudah melewati batas waktu 60 menit dan otomatis direvoke.")
+        render_landing()
+        return
 
-    st.markdown('<div class="hero"><span class="badge">🔐 room aktif</span><span class="badge">private invite</span><h1>AntiTrust Room</h1><p class="muted">Pesan teks dan packet disimpan terenkripsi. File asli hanya didekripsi saat dibuka.</p></div>', unsafe_allow_html=True)
+    st.markdown('<div class="hero"><span class="badge">🔐 room aktif</span><span class="badge">max 60 menit</span><span class="badge">auto revoke</span><h1>AntiTrust Room</h1><p class="muted">Pesan teks dan packet disimpan terenkripsi. Saat countdown room habis, room dihancurkan dan semua invite link direvoke.</p></div>', unsafe_allow_html=True)
+    current_invite_left = invite_seconds_left(invite_token)
+    col_timer1, col_timer2 = st.columns(2)
+    with col_timer1:
+        render_countdown("Sisa waktu room", room_seconds_left(room))
+    with col_timer2:
+        render_countdown("Sisa waktu invite link", current_invite_left)
     username = st.text_input("Nama pengguna", placeholder="contoh: adiora")
     username = username.strip()[:40]
     if not username:
         st.info("Isi nama pengguna untuk masuk ke room.")
         return
 
+    if room_is_expired(room):
+        destroy_room_and_revoke(room)
+        st.error("Room sudah kedaluwarsa dan otomatis direvoke.")
+        st.rerun()
     active_users = update_online(room, username)
     messages = load_messages(room)
     config = get_room_config(room)
-    st.caption(f"User: {username} · Peers aktif: {len(active_users)} · Auto-destroy: {choice_from_minutes(config.get('auto_destroy_minutes'))}")
+    st.caption(f"User: {username} · Peers aktif: {len(active_users)} · Room berakhir dalam: {format_countdown(room_seconds_left(room))} · Auto-destroy kosong: {choice_from_minutes(config.get('auto_destroy_minutes'))}")
+    render_room_invite_panel(room, username)
+    render_room_actions(room, username)
     render_room_settings(room)
     render_panic(room)
     render_sound_notice(latest_foreign_signature(messages, username), sound)
