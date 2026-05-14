@@ -917,6 +917,7 @@ def get_room_config(room: str) -> dict[str, Any]:
         "last_active_at": int(config.get("last_active_at", now_epoch())),
         "destroyed_at": int(config.get("destroyed_at", 0)),
         "pinned_message_id": str(config.get("pinned_message_id", "") or ""),
+        "creator_password_hash": str(config.get("creator_password_hash", "") or ""),
     }
 
 
@@ -926,7 +927,62 @@ def save_room_config(room: str, config: dict[str, Any]) -> None:
     atomic_write_json(ROOM_SETTINGS_FILE, settings)
 
 
-def ensure_room_config(room: str, lifetime_minutes: int = ROOM_DEFAULT_TTL_MINUTES, created_by: str = "") -> dict[str, Any]:
+def creator_password_digest(room: str, password: str) -> str:
+    """Hash password pembuat room tanpa menyimpan password asli."""
+    clean_password = str(password or "")
+    return hmac_digest(f"room-owner::{room_key(room)}::{clean_password}")
+
+
+def room_has_creator_password(room: str) -> bool:
+    config = get_room_config(room)
+    return bool(config.get("creator_password_hash"))
+
+
+def set_room_creator_password(room: str, password: str) -> None:
+    clean_password = str(password or "").strip()
+    if not clean_password:
+        return
+    config = get_room_config(room)
+    config["creator_password_hash"] = creator_password_digest(room, clean_password)
+    save_room_config(room, config)
+
+
+def verify_room_creator_password(room: str, password: str) -> bool:
+    config = get_room_config(room)
+    stored = str(config.get("creator_password_hash", "") or "")
+    if not stored:
+        return False
+    return hmac.compare_digest(stored, creator_password_digest(room, str(password or "")))
+
+
+def room_creator_session_key(room: str) -> str:
+    return "creator_ok::" + room_key(room)
+
+
+def room_creator_is_unlocked(room: str) -> bool:
+    return bool(st.session_state.get("admin_ok")) or bool(st.session_state.get(room_creator_session_key(room)))
+
+
+def render_room_creator_unlock(room: str) -> bool:
+    """Minta password pembuat sebelum aksi sensitif seperti revoke/hapus chat."""
+    if room_creator_is_unlocked(room):
+        return True
+    if not room_has_creator_password(room):
+        st.warning("Aksi ini hanya tersedia untuk admin karena room lama ini belum punya password pembuat.")
+        return False
+    st.info("Masukkan password pembuat room untuk revoke room atau hapus chat.")
+    password = st.text_input("Password pembuat room", type="password", key=f"creator_password_unlock::{room_key(room)}")
+    if st.button("Unlock aksi pembuat", use_container_width=True, key=f"creator_unlock_btn::{room_key(room)}"):
+        if verify_room_creator_password(room, password):
+            st.session_state[room_creator_session_key(room)] = True
+            st.success("Akses pembuat aktif.")
+            st.rerun()
+        else:
+            st.error("Password pembuat salah.")
+    return False
+
+
+def ensure_room_config(room: str, lifetime_minutes: int = ROOM_DEFAULT_TTL_MINUTES, created_by: str = "", creator_password: str = "") -> dict[str, Any]:
     room = clean_room_name(room)
     settings = load_json(ROOM_SETTINGS_FILE)
     key = room_key(room)
@@ -936,6 +992,8 @@ def ensure_room_config(room: str, lifetime_minutes: int = ROOM_DEFAULT_TTL_MINUT
         config = get_room_config(room)
         if not config.get("room_cipher"):
             config["room_cipher"] = encrypt_text(room)
+        if str(creator_password or "").strip() and not config.get("creator_password_hash"):
+            config["creator_password_hash"] = creator_password_digest(room, creator_password)
         settings[key] = config
         atomic_write_json(ROOM_SETTINGS_FILE, settings)
         return config
@@ -949,6 +1007,7 @@ def ensure_room_config(room: str, lifetime_minutes: int = ROOM_DEFAULT_TTL_MINUT
         "auto_destroy_minutes": min(DEFAULT_DESTROY_MINUTES, lifetime_minutes),
         "last_active_at": now,
         "destroyed_at": 0,
+        "creator_password_hash": creator_password_digest(room, creator_password) if str(creator_password or "").strip() else "",
     }
     settings[key] = config
     atomic_write_json(ROOM_SETTINGS_FILE, settings)
@@ -1426,9 +1485,9 @@ def create_invite(room: str, ttl_minutes: int = INVITE_DEFAULT_TTL_MINUTES, crea
     return token
 
 
-def create_room_with_invite(room: str, lifetime_minutes: int, created_by: str = "") -> str:
+def create_room_with_invite(room: str, lifetime_minutes: int, created_by: str = "", creator_password: str = "") -> str:
     room = clean_room_name(room)
-    ensure_room_config(room, clamp_minutes(lifetime_minutes, ROOM_MAX_TTL_MINUTES), created_by)
+    ensure_room_config(room, clamp_minutes(lifetime_minutes, ROOM_MAX_TTL_MINUTES), created_by, creator_password)
     return create_invite(room, clamp_minutes(lifetime_minutes, INVITE_MAX_TTL_MINUTES), created_by)
 
 
@@ -1956,13 +2015,16 @@ def render_admin_panel() -> None:
 
         st.success("Admin aktif")
         room = st.text_input("Nama room tujuan", placeholder="kelas-private-01")
+        creator_password = st.text_input("Password pembuat room", type="password", help="Password ini dipakai untuk revoke room dan hapus chat tanpa login admin.", key="admin_creator_room_password")
         ttl = st.slider("Masa aktif room & invite link", min_value=1, max_value=ROOM_MAX_TTL_MINUTES, value=ROOM_DEFAULT_TTL_MINUTES, help="Maksimal 1 jam. Tampilan link hanya muncul 1 menit setelah dibuat, tanpa revoke.")
         if st.button("Buat room + invite link", use_container_width=True):
             room = clean_room_name(room)
             if not room:
                 st.warning("Nama room tidak boleh kosong.")
+            elif len(str(creator_password or "").strip()) < 4:
+                st.warning("Password pembuat room minimal 4 karakter.")
             else:
-                token = create_room_with_invite(room, int(ttl), "admin")
+                token = create_room_with_invite(room, int(ttl), "admin", creator_password)
                 st.session_state["last_invite"] = build_invite_url(token)
                 st.session_state["last_invite_token"] = token
                 st.session_state["last_room"] = room
@@ -1992,6 +2054,7 @@ def render_public_room_creator() -> None:
             creator = st.text_input("Nama pembuat", placeholder="NamaUnik", key="creator_name")
         with col_b:
             room = st.text_input("Nama room", placeholder="kelas-private-01", key="public_room_name")
+        creator_password = st.text_input("Password pembuat room", type="password", help="Password ini dipakai pembuat room untuk revoke room dan hapus chat.", key="public_creator_room_password")
         ttl = st.slider("Durasi room", min_value=1, max_value=ROOM_MAX_TTL_MINUTES, value=ROOM_DEFAULT_TTL_MINUTES, help="Maksimal 60 menit. Tampilan link hilang otomatis setelah 1 menit, tanpa revoke.", key="public_room_ttl")
         if st.button("Create room + link", use_container_width=True):
             room = clean_room_name(room)
@@ -2001,7 +2064,10 @@ def render_public_room_creator() -> None:
             creator_name = validate_display_name(creator or "public", is_admin=bool(st.session_state.get("admin_ok")), field_label="Nama pembuat")
             if creator_name is None:
                 return
-            token = create_room_with_invite(room, int(ttl), creator_name)
+            if len(str(creator_password or "").strip()) < 4:
+                st.warning("Password pembuat room minimal 4 karakter.")
+                return
+            token = create_room_with_invite(room, int(ttl), creator_name, creator_password)
             st.session_state["public_invite_url"] = build_invite_url(token)
             st.session_state["public_invite_token"] = token
             st.session_state["public_room"] = room
@@ -2147,6 +2213,9 @@ def render_room_actions(room: str, username: str) -> None:
     with st.expander("Aksi", expanded=False):
         st.caption("Keluar room dinonaktifkan agar identitas tidak bisa direset.")
 
+        if not render_room_creator_unlock(room):
+            return
+
         pending_room = st.session_state.get("destroy_pending_room")
         countdown_until = int(st.session_state.get("destroy_countdown_until", 0) or 0)
 
@@ -2173,11 +2242,11 @@ def render_room_actions(room: str, username: str) -> None:
                 st.query_params.clear()
             except Exception:
                 pass
-            st.success(f"Room dihancurkan. {count} pesan/packet dihapus dan {revoked} invite link direvoke.")
+            st.success(f"Room direvoke. {count} pesan/packet dihapus dan {revoked} invite link direvoke.")
             st.rerun()
 
-        confirm = st.checkbox("Saya paham: room, pesan, packet, dan invite link akan dihancurkan", key="destroy_room_confirm")
-        if st.button("Hancurkan room + revoke key", type="primary", use_container_width=True, disabled=not confirm):
+        confirm = st.checkbox("Saya paham: room, pesan, packet, dan invite link akan direvoke/dihapus", key="destroy_room_confirm")
+        if st.button("Revoke room + hapus chat", type="primary", use_container_width=True, disabled=not confirm):
             st.session_state["destroy_pending_room"] = room
             st.session_state["destroy_countdown_until"] = now_epoch() + 3
             st.rerun()
@@ -2196,9 +2265,11 @@ def render_room_settings(room: str) -> None:
 
 
 def render_panic(room: str) -> None:
-    st.markdown('<div class="danger-box"><b>Panic Destroy</b> <span class="muted">hapus semua pesan/packet room aktif.</span></div>', unsafe_allow_html=True)
-    confirm = st.checkbox("Saya paham tindakan ini menghapus pesan room aktif")
-    if st.button("Panic destroy sekarang", type="primary", use_container_width=True, disabled=not confirm):
+    st.markdown('<div class="danger-box"><b>Hapus Chat</b> <span class="muted">hapus semua pesan/packet room aktif tanpa revoke room.</span></div>', unsafe_allow_html=True)
+    if not render_room_creator_unlock(room):
+        return
+    confirm = st.checkbox("Saya paham tindakan ini menghapus pesan room aktif", key="panic_delete_confirm")
+    if st.button("Hapus chat sekarang", type="primary", use_container_width=True, disabled=not confirm):
         count = panic_destroy(room)
         st.success(f"Berhasil menghapus {count} pesan/packet.")
         st.rerun()
