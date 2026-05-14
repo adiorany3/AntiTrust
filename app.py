@@ -1008,7 +1008,14 @@ def render_room_creator_unlock(room: str, context_key: str = "default") -> bool:
     return False
 
 
-def ensure_room_config(room: str, lifetime_minutes: int = ROOM_DEFAULT_TTL_MINUTES, created_by: str = "", creator_password: str = "") -> dict[str, Any]:
+def ensure_room_config(
+    room: str,
+    lifetime_minutes: int = ROOM_DEFAULT_TTL_MINUTES,
+    created_by: str = "",
+    creator_password: str = "",
+    *,
+    max_lifetime_minutes: int = ROOM_MAX_TTL_MINUTES,
+) -> dict[str, Any]:
     room = clean_room_name(room)
     settings = load_json(ROOM_SETTINGS_FILE)
     key = room_key(room)
@@ -1023,7 +1030,7 @@ def ensure_room_config(room: str, lifetime_minutes: int = ROOM_DEFAULT_TTL_MINUT
         settings[key] = config
         atomic_write_json(ROOM_SETTINGS_FILE, settings)
         return config
-    lifetime_minutes = clamp_minutes(lifetime_minutes, ROOM_MAX_TTL_MINUTES)
+    lifetime_minutes = clamp_minutes(lifetime_minutes, max_lifetime_minutes)
     config = {
         "room_key": key,
         "room_cipher": encrypt_text(room),
@@ -1493,7 +1500,7 @@ def token_hash(token: str) -> str:
 
 def create_invite(room: str, ttl_minutes: int = INVITE_DEFAULT_TTL_MINUTES, created_by: str = "", invite_max_ttl_minutes: int = INVITE_MAX_TTL_MINUTES) -> str:
     room = clean_room_name(room)
-    config = ensure_room_config(room, ROOM_DEFAULT_TTL_MINUTES, created_by)
+    config = ensure_room_config(room, ROOM_DEFAULT_TTL_MINUTES, created_by, max_lifetime_minutes=invite_max_ttl_minutes)
     room_left_seconds = max(1, int(config.get("expires_at", now_epoch())) - now_epoch())
     max_ttl_minutes = max(1, min(int(invite_max_ttl_minutes), (room_left_seconds + 59) // 60))
     ttl_minutes = clamp_minutes(ttl_minutes, max_ttl_minutes)
@@ -1523,7 +1530,7 @@ def create_room_with_invite(
 ) -> str:
     room = clean_room_name(room)
     lifetime = clamp_minutes(lifetime_minutes, max_lifetime_minutes)
-    ensure_room_config(room, lifetime, created_by, creator_password)
+    ensure_room_config(room, lifetime, created_by, creator_password, max_lifetime_minutes=max_lifetime_minutes)
     return create_invite(room, lifetime, created_by, max_invite_ttl_minutes)
 
 
@@ -1759,6 +1766,19 @@ def format_countdown(seconds: int) -> str:
     return f"{minutes:02d}:{sec:02d}"
 
 
+def format_room_time_left(seconds: int) -> str:
+    """Format sisa waktu room agar durasi admin panjang tidak tampil sebagai ribuan menit."""
+    seconds = max(0, int(seconds))
+    days, rem = divmod(seconds, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, sec = divmod(rem, 60)
+    if days:
+        return f"{days} hari {hours:02d}:{minutes:02d}:{sec:02d}"
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{sec:02d}"
+    return f"{minutes:02d}:{sec:02d}"
+
+
 def render_countdown(label: str, seconds_left: int) -> None:
     safe_label = html.escape(label)
     safe_id = "countdown_" + hashlib.sha1(f"{label}:{seconds_left}:{time.time_ns()}".encode()).hexdigest()[:12]
@@ -1766,16 +1786,27 @@ def render_countdown(label: str, seconds_left: int) -> None:
         f"""
         <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;border:1px solid rgba(255,255,255,.22);border-radius:15px;padding:5px 8px;background:rgba(255,255,255,.10);backdrop-filter:blur(18px);color:inherit">
           <div style="font-size:10px;opacity:.72;margin-bottom:0">{safe_label}</div>
-          <div id="{safe_id}" style="font-size:16px;font-weight:800;letter-spacing:-.04em">{format_countdown(seconds_left)}</div>
+          <div id="{safe_id}" style="font-size:16px;font-weight:800;letter-spacing:-.04em">{format_room_time_left(seconds_left)}</div>
         </div>
         <script>
           let left = {max(0, int(seconds_left))};
           const el = document.getElementById('{safe_id}');
+          function fmt(total) {{
+            total = Math.max(0, total);
+            const d = Math.floor(total / 86400);
+            const h = Math.floor((total % 86400) / 3600);
+            const m = Math.floor((total % 3600) / 60);
+            const s = total % 60;
+            const hh = h.toString().padStart(2, '0');
+            const mm = m.toString().padStart(2, '0');
+            const ss = s.toString().padStart(2, '0');
+            if (d > 0) return `${{d}} hari ${{hh}}:${{mm}}:${{ss}}`;
+            if (h > 0) return `${{hh}}:${{mm}}:${{ss}}`;
+            return `${{mm}}:${{ss}}`;
+          }}
           function tick() {{
             if (!el) return;
-            const m = Math.floor(left / 60).toString().padStart(2, '0');
-            const s = (left % 60).toString().padStart(2, '0');
-            el.textContent = `${{m}}:${{s}}`;
+            el.textContent = fmt(left);
             if (left > 0) left -= 1;
           }}
           tick(); setInterval(tick, 1000);
@@ -2155,7 +2186,7 @@ def render_admin_active_rooms_panel() -> None:
             with col_info:
                 st.markdown(f"**{html.escape(room_label)}**")
                 st.caption(
-                    f"Sisa waktu {format_countdown(row['seconds_left'])} · "
+                    f"Sisa waktu {format_room_time_left(row['seconds_left'])} · "
                     f"Online {row['online']} · Pesan/packet {row['messages']} · "
                     f"Link aktif {row.get('invite_count', 0)} · Pembuat {row['created_by']}"
                 )
