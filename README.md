@@ -111,3 +111,8 @@ PY
 - Panel invite sekarang otomatis ditutup saat sisa waktu room kurang dari 1 menit.
 - State slider invite lama di-reset jika sudah di luar batas sisa waktu room.
 - Jika room sudah habis, sesi dikembalikan ke halaman awal setelah revoke.
+
+## v17.7 Enter to Send
+- Input pesan text diganti menjadi satu baris agar tombol Enter langsung mengirim pesan.
+- Placeholder diperbarui menjadi `Tulis pesan lalu tekan Enter...`.
+- Pesan kosong/spasi tidak akan dikirim.

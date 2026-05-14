@@ -2020,11 +2020,17 @@ def render_message_form(room: str, username: str) -> None:
         tab_text, tab_special, tab_img, tab_voice, tab_doc = st.tabs(["Text", "Secret", "Image", "Voice", "Doc"])
         with tab_text:
             with st.form("text-message", clear_on_submit=True):
-                message = st.text_area("Pesan", placeholder="Tulis pesan terenkripsi...", height=52, max_chars=MAX_TEXT_LENGTH)
+                message = st.text_input(
+                    "Pesan",
+                    placeholder="Tulis pesan lalu tekan Enter...",
+                    max_chars=MAX_TEXT_LENGTH,
+                    key="text_message_enter_input",
+                )
                 submitted = st.form_submit_button("Kirim", use_container_width=True)
                 if submitted:
-                    if not rate_limited("text"):
-                        append_text(room, username, message, ttl_seconds)
+                    clean_message = (message or "").strip()
+                    if clean_message and not rate_limited("text"):
+                        append_text(room, username, clean_message, ttl_seconds)
                         st.rerun()
         with tab_special:
             kind = st.selectbox("Jenis", ["Secret Note", "One-Time Message", "Poll Cepat", "Location Pin", "Checklist Bersama"], key="special_kind")
