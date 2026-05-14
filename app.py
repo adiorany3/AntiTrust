@@ -307,7 +307,7 @@ CHAT_CSS = """
   --chat-bg:rgba(255,255,255,.46);
   --bubble:rgba(255,255,255,.64);
   --bubble-text:#102033;
-  --me:linear-gradient(135deg,#1877f2,#7c3aed);
+  --me:linear-gradient(135deg,hsl(var(--user-hue,215) 84% 52%),hsl(calc(var(--user-hue,215) + 36) 82% 58%));
   --me-text:#ffffff;
   --muted:#506176;
   --line:rgba(255,255,255,.68);
@@ -322,7 +322,7 @@ CHAT_CSS = """
     --chat-bg:rgba(15,23,42,.45);
     --bubble:rgba(23,31,52,.70);
     --bubble-text:#eef5ff;
-    --me:linear-gradient(135deg,#2563eb,#9333ea);
+    --me:linear-gradient(135deg,hsl(var(--user-hue,215) 82% 50%),hsl(calc(var(--user-hue,215) + 36) 80% 56%));
     --me-text:#ffffff;
     --muted:#bfcbdd;
     --line:rgba(255,255,255,.15);
@@ -354,19 +354,36 @@ html,body{margin:0;background:transparent;font-family:Inter,system-ui,-apple-sys
   max-width:76%;
   padding:9px 11px;
   border-radius:18px;
-  background:var(--bubble);
+  background:linear-gradient(135deg,
+    hsl(var(--user-hue,215) 86% 96% / .82),
+    hsl(calc(var(--user-hue,215) + 34) 84% 97% / .68)
+  );
   color:var(--bubble-text);
-  border:1px solid var(--line-strong);
+  border:1px solid hsl(var(--user-hue,215) 72% 48% / .34);
+  border-left:4px solid hsl(var(--user-hue,215) 78% 48% / .88);
   overflow-wrap:anywhere;
   line-height:1.43;
-  box-shadow:var(--inner),0 10px 28px rgba(0,0,0,.09);
+  box-shadow:var(--inner),0 10px 28px hsl(var(--user-hue,215) 62% 35% / .12);
   backdrop-filter:blur(18px) saturate(180%);
   -webkit-backdrop-filter:blur(18px) saturate(180%);
 }
 .bubble small{color:var(--muted);}
-.row.me .bubble{background:var(--me);color:var(--me-text);border-color:rgba(255,255,255,.28);}
+@media (prefers-color-scheme: dark){
+  .bubble{
+    background:linear-gradient(135deg,
+      hsl(var(--user-hue,215) 52% 22% / .82),
+      hsl(calc(var(--user-hue,215) + 34) 48% 18% / .72)
+    );
+    border-color:hsl(var(--user-hue,215) 70% 62% / .30);
+    border-left-color:hsl(var(--user-hue,215) 82% 66% / .92);
+    box-shadow:var(--inner),0 12px 30px rgba(0,0,0,.18);
+  }
+}
+.row.me .bubble{background:var(--me);color:var(--me-text);border-color:rgba(255,255,255,.28);border-left-color:rgba(255,255,255,.78);}
 .row.me .bubble small{color:rgba(255,255,255,.86);}
-.meta{font-size:10px;color:var(--muted);margin-top:4px;}
+.meta{font-size:10px;color:var(--muted);margin-top:4px;display:flex;align-items:center;gap:4px;flex-wrap:wrap;}
+.user-dot{width:8px;height:8px;border-radius:999px;display:inline-block;background:hsl(var(--user-hue,215) 82% 54%);box-shadow:0 0 0 2px hsl(var(--user-hue,215) 82% 54% / .16);}
+.row.me .user-dot{background:rgba(255,255,255,.92);box-shadow:0 0 0 2px rgba(255,255,255,.20);}
 .row.me .meta{color:rgba(255,255,255,.80);}
 .admin-badge{display:inline-flex;align-items:center;margin-left:5px;padding:1px 6px;border-radius:999px;background:linear-gradient(135deg,#facc15,#fb923c);color:#111827!important;font-size:9px;font-weight:900;letter-spacing:.02em;text-transform:uppercase;box-shadow:0 4px 12px rgba(0,0,0,.18);}
 .row.me .admin-badge{background:rgba(255,255,255,.92);color:#111827!important;}
@@ -748,7 +765,7 @@ def get_locked_username(is_admin: bool = False) -> str | None:
         return None
 
     with st.form("lock-username-form"):
-        raw_name = st.text_input("Nama pengguna", placeholder="contoh: Ng4D1miN", max_chars=40)
+        raw_name = st.text_input("Nama pengguna", placeholder="contoh: adiora", max_chars=40)
         submitted = st.form_submit_button("Tetapkan nama pengguna", use_container_width=True)
     if not submitted:
         st.info("Isi dan tetapkan nama pengguna untuk masuk ke room. Setelah ditetapkan, nama tidak bisa diubah selama sesi ini.")
@@ -1415,6 +1432,13 @@ def get_query_param(name: str) -> str | None:
         return values[0] if values else None
 
 
+def user_hue(username: str) -> int:
+    """Deterministic, readable accent color for each display name."""
+    clean = normalize_display_name(username).casefold()
+    digest = hashlib.sha256(clean.encode("utf-8")).hexdigest()
+    return int(digest[:8], 16) % 360
+
+
 def render_chat(messages: list[dict[str, Any]], username: str) -> str:
     if not messages:
         return CHAT_CSS + '<div class="chat"><div class="empty">Belum ada pesan. Mulai percakapan aman.</div></div>'
@@ -1425,6 +1449,8 @@ def render_chat(messages: list[dict[str, Any]], username: str) -> str:
         sender = html.escape(raw_sender)
         sender_label = username_with_badge_html(raw_sender)
         is_me = sender == html.escape(username)
+        hue = user_hue(raw_sender)
+        bubble_style = f' style="--user-hue:{hue}"'
         time_label = html.escape(str(msg.get("time", "")))
         msg_type = str(msg.get("type", "text"))
         if msg_type == "text":
@@ -1466,7 +1492,10 @@ def render_chat(messages: list[dict[str, Any]], username: str) -> str:
         content += reaction_html(msg) + expire_html(msg)
         pin = ' 📌' if msg.get("_pinned") else ''
         cls = "row me" if is_me else "row"
-        rows += f'<div class="{cls}"><div class="bubble">{content}<div class="meta">{sender_label}{" · kamu" if is_me else ""}{pin} · {time_label}</div></div></div>'
+        dot = '<span class="user-dot" aria-hidden="true"></span>'
+        me_label = '<span>kamu</span>' if is_me else ''
+        pin_label = '<span>📌</span>' if pin else ''
+        rows += f'<div class="{cls}"><div class="bubble"{bubble_style}>{content}<div class="meta">{dot}<span>{sender_label}</span>{me_label}{pin_label}<span>{time_label}</span></div></div></div>'
     return CHAT_CSS + f'<div class="chat">{rows}</div>'
 
 
@@ -1584,7 +1613,7 @@ def render_public_room_creator() -> None:
         st.caption("Maksimal 60 menit. Auto revoke saat waktu habis.")
         col_a, col_b = st.columns(2)
         with col_a:
-            creator = st.text_input("Nama pembuat", placeholder="User", key="creator_name")
+            creator = st.text_input("Nama pembuat", placeholder="adiora", key="creator_name")
         with col_b:
             room = st.text_input("Nama room", placeholder="kelas-private-01", key="public_room_name")
         ttl = st.slider("Durasi room", min_value=1, max_value=ROOM_MAX_TTL_MINUTES, value=ROOM_DEFAULT_TTL_MINUTES, help="Maksimal 60 menit.", key="public_room_ttl")
@@ -1622,7 +1651,7 @@ def render_public_room_creator() -> None:
 
 def render_landing() -> None:
     st.markdown('<div class="hero"><span class="badge">🔐 secure</span><span class="badge">60 menit</span><span class="badge">auto revoke</span><h1>AntiTrust</h1><p class="muted">Room terenkripsi sementara. Share link, auto revoke.</p></div>', unsafe_allow_html=True)
-    st.caption("Gunakanlah dengan bijak")
+    st.caption("Nama pengguna terkunci setelah ditetapkan. Jika memakai nama adioranye atau Galuh Adi Insani, wajib login admin dan akan tampil badge khusus.")
     render_public_room_creator()
     with st.expander("Admin panel", expanded=False):
         render_admin_panel()

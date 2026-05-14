@@ -66,3 +66,10 @@ PY
 - Jika sisa waktu invite link sudah `00:00`, link otomatis disembunyikan dari tampilan.
 - Halaman dengan query invite yang sudah habis otomatis dibersihkan dan kembali ke halaman awal.
 - QR Invite dan Share WhatsApp ikut hilang saat link expired.
+
+## Update v15 - User Color Chat
+- Setiap username mendapat warna chat otomatis yang berbeda dan konsisten.
+- Bubble pesan user lain memakai aksen warna lembut agar mudah dibedakan.
+- Bubble pesan milik sendiri memakai gradient berdasarkan warna username.
+- Metadata chat diberi titik warna user agar percakapan lebih nyaman dibaca.
+- Warna tetap aman untuk light mode dan dark mode.
