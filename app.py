@@ -2206,39 +2206,87 @@ def format_room_time_left(seconds: int) -> str:
 def render_countdown(label: str, seconds_left: int) -> None:
     safe_label = html.escape(label)
     safe_id = "countdown_" + hashlib.sha1(f"{label}:{seconds_left}:{time.time_ns()}".encode()).hexdigest()[:12]
+    warning_id = safe_id + "_warning"
+
     components.html(
         f"""
-        <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;border:1px solid rgba(255,255,255,.22);border-radius:15px;padding:5px 8px;background:rgba(255,255,255,.10);backdrop-filter:blur(18px);color:inherit">
-          <div style="font-size:10px;opacity:.72;margin-bottom:0">{safe_label}</div>
-          <div id="{safe_id}" style="font-size:16px;font-weight:800;letter-spacing:-.04em">{format_room_time_left(seconds_left)}</div>
+        <div style="
+          font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+          border:1px solid rgba(255,255,255,.22);
+          border-radius:15px;
+          padding:7px 9px;
+          background:rgba(255,255,255,.10);
+          backdrop-filter:blur(18px);
+          color:inherit;
+        ">
+          <div style="font-size:10px;opacity:.72;margin-bottom:2px">{safe_label}</div>
+
+          <div id="{safe_id}" style="
+            font-size:16px;
+            font-weight:800;
+            letter-spacing:-.04em;
+          ">{format_room_time_left(seconds_left)}</div>
+
+          <div id="{warning_id}" style="
+            display:none;
+            margin-top:6px;
+            padding:6px 8px;
+            border-radius:10px;
+            background:rgba(255,59,48,.18);
+            border:1px solid rgba(255,59,48,.55);
+            color:#ffd9d6;
+            font-size:12px;
+            font-weight:800;
+          "></div>
         </div>
+
         <script>
           let left = {max(0, int(seconds_left))};
           const el = document.getElementById('{safe_id}');
+          const warning = document.getElementById('{warning_id}');
+
           function fmt(total) {{
             total = Math.max(0, total);
             const d = Math.floor(total / 86400);
             const h = Math.floor((total % 86400) / 3600);
             const m = Math.floor((total % 3600) / 60);
             const s = total % 60;
+
             const hh = h.toString().padStart(2, '0');
             const mm = m.toString().padStart(2, '0');
             const ss = s.toString().padStart(2, '0');
+
             if (d > 0) return `${{d}} hari ${{hh}}:${{mm}}:${{ss}}`;
             if (h > 0) return `${{hh}}:${{mm}}:${{ss}}`;
             return `${{mm}}:${{ss}}`;
           }}
+
           function tick() {{
             if (!el) return;
+
             el.textContent = fmt(left);
+
+            if (warning) {{
+              if (left > 0 && left <= 30) {{
+                warning.style.display = 'block';
+                warning.textContent = `⚠️ Waktu hampir habis. Room akan berakhir dalam ${{left}} detik.`;
+              }} else if (left <= 0) {{
+                warning.style.display = 'block';
+                warning.textContent = '⛔ Waktu habis. Room akan otomatis direvoke.';
+              }} else {{
+                warning.style.display = 'none';
+              }}
+            }}
+
             if (left > 0) left -= 1;
           }}
-          tick(); setInterval(tick, 1000);
+
+          tick();
+          setInterval(tick, 1000);
         </script>
         """,
-        height=43,
+        height=76,
     )
-
 
 def resolve_invite(token: str | None) -> str | None:
     if not token:
