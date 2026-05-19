@@ -51,6 +51,8 @@ LOCAL_KEY_FILE = DATA_DIR / "fernet.key"
 MAX_TEXT_LENGTH = 2000
 MAX_MEDIA_BYTES = 10 * 1024 * 1024
 ONLINE_ACTIVE_SECONDS = 25
+# Hindari write file setiap rerun/refresh. Cukup update heartbeat berkala.
+ONLINE_HEARTBEAT_WRITE_SECONDS = 10
 DEFAULT_DESTROY_MINUTES = 30
 AUTO_DESTROY_CHOICES = ["5 menit", "10 menit", "20 menit", "30 menit", "60 menit"]
 MESSAGE_RATE_LIMIT_SECONDS = 1.5
@@ -1502,16 +1504,39 @@ def username_taken_in_room(room: str, username: str) -> str | None:
     return None
 
 
-def update_online(room: str, username: str) -> list[str]:
+def update_online(room: str, username: str, *, force: bool = False) -> list[str]:
+    """Update status online tanpa menulis JSON di setiap render.
+
+    Sebelumnya fungsi ini dipanggil pada setiap rerun/autorefresh sehingga file
+    online_status.json dan room_settings.json ditulis terus-menerus. Di Streamlit,
+    pola itu membuat chat terasa seperti sering reload. Sekarang heartbeat hanya
+    ditulis saat perlu: sesi baru, username berubah, atau sudah lewat interval.
+    """
     online = load_json(ONLINE_FILE)
     key = room_key(room)
     now = now_epoch()
     session_id = get_session_id()
     active = normalize_online_entries(online.get(key, {}), now)
-    active[session_id] = {"username": username, "last_seen": now, "session_id": session_id}
-    online[key] = active
-    atomic_write_json(ONLINE_FILE, online)
-    mark_room_active(room)
+
+    existing = active.get(session_id, {}) if isinstance(active.get(session_id), dict) else {}
+    last_write_key = f"online_last_write::{key}"
+    last_write = int(st.session_state.get(last_write_key, 0) or 0)
+    should_write = (
+        force
+        or session_id not in active
+        or normalize_display_name(existing.get("username", "")) != normalize_display_name(username)
+        or now - last_write >= ONLINE_HEARTBEAT_WRITE_SECONDS
+    )
+
+    if should_write:
+        active[session_id] = {"username": username, "last_seen": now, "session_id": session_id}
+        online[key] = active
+        atomic_write_json(ONLINE_FILE, online)
+        mark_room_active(room)
+        st.session_state[last_write_key] = now
+    elif session_id not in active:
+        active[session_id] = {"username": username, "last_seen": now, "session_id": session_id}
+
     return [entry["username"] for sid, entry in active.items() if sid != session_id]
 
 
@@ -2764,15 +2789,32 @@ def render_landing() -> None:
 
 def render_sidebar() -> tuple[bool, int, bool]:
     st.sidebar.title("🔐 AntiTrust")
-    # Auto refresh sengaja dibuat aktif secara default agar nyaman di HP.
-    # Komponen refresh ditempatkan dekat area chat, bukan di awal halaman, supaya fokus tetap ke pesan.
-    auto_refresh = True
-    interval = st.sidebar.selectbox("Interval refresh", [2, 5, 8, 10, 15, 30, 60], index=0)
+    st.sidebar.caption("Mode stabil: halaman tidak refresh otomatis saat kamu mengetik.")
+
+    auto_refresh = st.sidebar.toggle(
+        "Live chat ringan",
+        value=False,
+        help="Jika Streamlit mendukung fragment, hanya area chat yang diperbarui. Form kirim tidak ikut reload.",
+    )
+    interval = st.sidebar.selectbox(
+        "Fallback refresh",
+        [15, 30, 60],
+        index=0,
+        disabled=not auto_refresh,
+        help="Dipakai hanya kalau versi Streamlit belum mendukung fragment.",
+    )
     sound = st.sidebar.toggle("Suara pesan baru", value=True)
-    if st.sidebar.button("Refresh manual", use_container_width=True):
+
+    if st.sidebar.button("Refresh chat sekarang", use_container_width=True):
         st.rerun()
-    st.sidebar.caption("Auto refresh chat aktif otomatis setiap 2 detik. Di HP, fokus diarahkan ke area pesan dan form kirim.")
-    return auto_refresh, interval, sound
+
+    if auto_refresh and hasattr(st, "fragment"):
+        st.sidebar.success("Live chat aktif: refresh hanya area chat, bukan seluruh halaman.")
+    elif auto_refresh:
+        st.sidebar.warning("Versi Streamlit belum mendukung fragment. Fallback refresh halaman penuh diperlambat.")
+    else:
+        st.sidebar.info("Auto refresh mati. Chat lebih stabil; gunakan tombol refresh jika ingin cek pesan baru.")
+    return auto_refresh, int(interval), sound
 
 
 def render_message_focus_marker() -> None:
@@ -3300,6 +3342,41 @@ def render_invite_expiry_redirect(seconds_left: int) -> None:
     )
 
 
+
+def render_live_chat_area(room: str, username: str, sound: bool) -> None:
+    """Render area chat. Fungsi ini aman dijalankan sebagai fragment.
+
+    Saat Live chat aktif dan versi Streamlit mendukung fragment, hanya bagian ini
+    yang rerun berkala. Form input tetap stabil sehingga pesan tidak hilang saat
+    user sedang mengetik.
+    """
+    active_users = update_online(room, username)
+    online_entries = get_room_online_entries(room)
+    messages = load_messages(room)
+    config = get_room_config(room)
+    status = room_status_label(room, len(active_users))
+    st.markdown(
+        f'<div class="room-status-line"><span class="muted">{username_with_badge_html(username)} · {html.escape(status)} · '
+        f'sisa {format_countdown(room_seconds_left(room))} · kosong: {choice_from_minutes(config.get("auto_destroy_minutes"))}</span></div>',
+        unsafe_allow_html=True,
+    )
+    render_online_users(online_entries, username)
+    render_sound_notice(latest_foreign_signature(messages, username), sound)
+    render_pinned_message(room, messages)
+    render_message_focus_marker()
+    render_messages = prepare_messages_for_render(room, messages)
+    components.html(render_chat(render_messages, username, room), height=430, scrolling=False)
+
+
+if hasattr(st, "fragment"):
+    @st.fragment(run_every="8s")
+    def render_live_chat_fragment(room: str, username: str, sound: bool) -> None:
+        render_live_chat_area(room, username, sound)
+else:
+    def render_live_chat_fragment(room: str, username: str, sound: bool) -> None:
+        render_live_chat_area(room, username, sound)
+
+
 def main() -> None:
     ensure_dirs()
     st.set_page_config(page_title=APP_TITLE, page_icon=APP_ICON, layout="centered")
@@ -3310,9 +3387,26 @@ def main() -> None:
         st.toast(f"{destroyed} room tidak aktif sudah dibersihkan.")
 
     invite_token = get_query_param("invite")
-    room = resolve_invite(invite_token)
-    if not room:
-        if invite_token:
+    room = resolve_invite(invite_token) if invite_token else None
+
+    # Setelah user berhasil masuk lewat invite, simpan room di session.
+    # Jadi ketika invite link habis, user yang sudah berada di room tidak ditendang
+    # kembali ke landing page. Invite hanya gerbang masuk; masa hidup chat tetap
+    # mengikuti TTL room.
+    if room:
+        st.session_state["active_room"] = room
+        st.session_state["active_invite_token"] = invite_token or ""
+    else:
+        remembered_room = clean_room_name(str(st.session_state.get("active_room", "") or ""))
+        if remembered_room and not room_is_expired(remembered_room):
+            room = remembered_room
+            invite_token = str(st.session_state.get("active_invite_token", "") or "") or None
+            if get_query_param("invite"):
+                try:
+                    st.query_params.clear()
+                except Exception:
+                    pass
+        elif invite_token:
             clear_invite_display("room_invite_url", "room_invite_token")
             try:
                 st.query_params.clear()
@@ -3320,28 +3414,35 @@ def main() -> None:
                 pass
             st.toast("Invite link tidak aktif atau sudah habis.")
             st.rerun()
+        else:
+            render_landing()
+            return
+
+    if not room:
         render_landing()
         return
+
     if room_is_expired(room):
         destroy_room_and_revoke(room)
-        st.error("Room sudah melewati batas waktu 60 menit dan otomatis direvoke.")
+        st.session_state.pop("active_room", None)
+        st.session_state.pop("active_invite_token", None)
+        st.error("Room sudah melewati batas waktu dan otomatis direvoke.")
         render_landing()
         return
 
-    current_invite_left = invite_seconds_left(invite_token)
-    if current_invite_left <= 0:
-        st.toast("Invite link sudah habis. Kembali ke halaman awal.")
-        force_landing_on_expired_invite()
+    current_invite_left = invite_seconds_left(invite_token) if invite_token else 0
 
-    st.markdown('<div class="hero"><span class="badge">🔐 aktif</span><span class="badge">60 menit</span><span class="badge">auto revoke</span><h1>AntiTrust Room</h1></div>', unsafe_allow_html=True)
+    st.markdown('<div class="hero"><span class="badge">🔐 aktif</span><span class="badge">room TTL</span><span class="badge">auto revoke</span><h1>AntiTrust Room</h1></div>', unsafe_allow_html=True)
     col_timer1, col_timer2 = st.columns(2)
     with col_timer1:
         render_countdown("Sisa waktu room", room_seconds_left(room))
     with col_timer2:
-        render_countdown("Sisa waktu invite link", current_invite_left)
-    render_invite_expiry_redirect(current_invite_left)
-    # Key Fernet dibuat otomatis dari nama room acak; penerima link langsung lanjut isi username.
-    # Jangan auto-refresh tiap detik; countdown berjalan di browser agar halaman tidak naik sendiri.
+        if current_invite_left > 0:
+            render_countdown("Sisa waktu invite link", current_invite_left)
+            render_invite_expiry_redirect(current_invite_left)
+        else:
+            st.markdown('<div class="card"><span class="muted">Invite link sudah selesai. Chat tetap aktif sampai waktu room habis.</span></div>', unsafe_allow_html=True)
+
     username = get_locked_username(is_admin=bool(st.session_state.get("admin_ok")))
     if not username:
         return
@@ -3356,32 +3457,25 @@ def main() -> None:
 
     if room_is_expired(room):
         destroy_room_and_revoke(room)
+        st.session_state.pop("active_room", None)
+        st.session_state.pop("active_invite_token", None)
         st.error("Room sudah kedaluwarsa dan otomatis direvoke.")
         st.rerun()
-    active_users = update_online(room, username)
-    online_entries = get_room_online_entries(room)
-    messages = load_messages(room)
-    config = get_room_config(room)
-    status = room_status_label(room, len(active_users))
-    st.markdown(
-        f'<div class="room-status-line"><span class="muted">{username_with_badge_html(username)} · {html.escape(status)} · '
-        f'sisa {format_countdown(room_seconds_left(room))} · kosong: {choice_from_minutes(config.get("auto_destroy_minutes"))}</span></div>',
-        unsafe_allow_html=True,
-    )
-    render_online_users(online_entries, username)
-    render_sound_notice(latest_foreign_signature(messages, username), sound)
-    render_pinned_message(room, messages)
-    render_compact_room_panel(room, username, messages)
-    render_messages = prepare_messages_for_render(room, messages)
-    render_message_focus_marker()
-    # Height iframe dibuat pas dengan chat panel agar tidak ada ruang kosong besar
-    # antara panel pesan dan form kirim.
-    components.html(render_chat(render_messages, username, room), height=430, scrolling=False)
+
+    # Panel fitur tetap dirender normal agar widget tidak ikut rerun fragment.
+    messages_for_panel = load_messages(room)
+    render_compact_room_panel(room, username, messages_for_panel)
+
+    if auto_refresh and hasattr(st, "fragment"):
+        render_live_chat_fragment(room, username, sound)
+    else:
+        render_live_chat_area(room, username, sound)
+        if auto_refresh and st_autorefresh is not None:
+            st_autorefresh(interval=max(15, int(interval)) * 1000, key="antitrust_message_refresh_fallback")
+            render_mobile_message_focus()
+
     render_message_form(room, username)
     render_compose_focus_marker()
-    render_mobile_message_focus()
-    if auto_refresh and st_autorefresh is not None:
-        st_autorefresh(interval=interval * 1000, key="antitrust_message_refresh")
 
 
 if __name__ == "__main__":
