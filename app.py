@@ -884,6 +884,15 @@ def room_crypto_session_key(room: str) -> str:
     return "room_fernet_key::" + room_key(room)
 
 
+def room_share_password_session_key(room: str) -> str:
+    """Simpan password plaintext hanya di session browser agar bisa ikut dibagikan via WhatsApp.
+
+    Password asli tidak pernah disimpan ke file JSON/server storage. Key ini hanya hidup
+    selama sesi Streamlit user yang membuat atau berhasil unlock room.
+    """
+    return "room_share_password::" + room_key(room)
+
+
 def room_crypto_salt(room: str) -> str:
     config = get_room_config(room)
     return str(config.get("room_fernet_salt", "") or "")
@@ -919,8 +928,9 @@ def remember_room_password(room: str, password: str) -> bool:
     salt = room_crypto_salt(room)
     if salt:
         st.session_state[room_crypto_session_key(room)] = derive_room_fernet_key(room, clean_password, salt).decode("ascii")
-    # Password yang benar juga membuka aksi pembuat room.
+    # Password yang benar juga membuka aksi pembuat room dan bisa dipakai untuk share WhatsApp.
     st.session_state[room_creator_session_key(room)] = True
+    st.session_state[room_share_password_session_key(room)] = clean_password
     return True
 
 
@@ -1358,6 +1368,7 @@ def set_room_creator_password(room: str, password: str) -> None:
         config["room_crypto_version"] = ROOM_CRYPTO_VERSION
     save_room_config(room, config)
     st.session_state[room_crypto_session_key(room)] = derive_room_fernet_key(room, clean_password, str(config.get("room_fernet_salt", ""))).decode("ascii")
+    st.session_state[room_share_password_session_key(room)] = clean_password
 
 
 def verify_room_creator_password(room: str, password: str) -> bool:
@@ -1421,6 +1432,7 @@ def ensure_room_config(
             config["room_crypto_version"] = ROOM_CRYPTO_VERSION
         if str(creator_password or "").strip() and config.get("room_fernet_salt"):
             st.session_state[room_crypto_session_key(room)] = derive_room_fernet_key(room, creator_password, str(config.get("room_fernet_salt", ""))).decode("ascii")
+            st.session_state[room_share_password_session_key(room)] = str(creator_password or "")
         settings[key] = config
         atomic_write_json(ROOM_SETTINGS_FILE, settings)
         return config
@@ -1440,6 +1452,7 @@ def ensure_room_config(
     }
     if str(creator_password or "").strip() and config.get("room_fernet_salt"):
         st.session_state[room_crypto_session_key(room)] = derive_room_fernet_key(room, creator_password, str(config.get("room_fernet_salt", ""))).decode("ascii")
+        st.session_state[room_share_password_session_key(room)] = str(creator_password or "")
     settings[key] = config
     atomic_write_json(ROOM_SETTINGS_FILE, settings)
     return config
@@ -2071,6 +2084,7 @@ def render_temporary_invite_link(
     display_until_key: str,
     input_key: str,
     label: str = "Link hilang dari halaman dalam",
+    password_key: str | None = None,
 ) -> bool:
     """Show invite link for 1 minute only in the UI; do not revoke token or room."""
     invite_url = st.session_state.get(url_key)
@@ -2088,6 +2102,8 @@ def render_temporary_invite_link(
         keys = [url_key, token_key, display_until_key]
         if room_key:
             keys.append(room_key)
+        if password_key:
+            keys.append(password_key)
         clear_invite_display(*keys)
         try:
             st.query_params.clear()
@@ -2101,13 +2117,16 @@ def render_temporary_invite_link(
         keys = [url_key, token_key, display_until_key]
         if room_key:
             keys.append(room_key)
+        if password_key:
+            keys.append(password_key)
         clear_invite_display(*keys)
         st.toast("Invite link sudah habis sesuai durasi aslinya.")
         st.rerun()
 
     room_name = st.session_state.get(room_key) if room_key else None
+    share_password = st.session_state.get(password_key) if password_key else None
     render_click_to_copy_invite_link(invite_url, input_key)
-    render_whatsapp_share(invite_url, room_name)
+    render_whatsapp_share(invite_url, room_name, share_password)
     with st.expander("QR Invite", expanded=False):
         render_qr_invite(invite_url)
     render_countdown(label, display_left)
@@ -2119,8 +2138,8 @@ def force_landing_on_expired_invite() -> None:
     """Clear invite query/state and return to the landing page."""
     clear_invite_display(
         "room_invite_url", "room_invite_token",
-        "public_invite_url", "public_invite_token", "public_room", "public_invite_display_until",
-        "last_invite", "last_invite_token", "last_room", "last_invite_display_until",
+        "public_invite_url", "public_invite_token", "public_room", "public_invite_display_until", "public_room_share_password",
+        "last_invite", "last_invite_token", "last_room", "last_invite_display_until", "last_room_share_password",
     )
     try:
         st.query_params.clear()
@@ -2136,6 +2155,8 @@ def render_expiring_invite_link(
     room_key: str | None = None,
     input_key: str,
     label: str = "Sisa waktu link",
+    password: str | None = None,
+    password_key: str | None = None,
 ) -> bool:
     """Render invite link only while it is active. Returns True when visible."""
     invite_url = st.session_state.get(url_key)
@@ -2147,12 +2168,15 @@ def render_expiring_invite_link(
         keys = [url_key, token_key]
         if room_key:
             keys.append(room_key)
+        if password_key:
+            keys.append(password_key)
         clear_invite_display(*keys)
         st.toast("Invite link sudah habis dan disembunyikan.")
         st.rerun()
     room_name = st.session_state.get(room_key) if room_key else None
+    share_password = password if password is not None else (st.session_state.get(password_key) if password_key else None)
     render_click_to_copy_invite_link(invite_url, input_key)
-    render_whatsapp_share(invite_url, room_name)
+    render_whatsapp_share(invite_url, room_name, share_password)
     with st.expander("QR Invite", expanded=False):
         render_qr_invite(invite_url)
     render_countdown(label, left)
@@ -2248,19 +2272,22 @@ def build_invite_url(token: str) -> str:
     return f"{public_base_url()}?{urlencode({'invite': token})}"
 
 
-def build_whatsapp_share_url(invite_url: str, room: str | None = None) -> str:
+def build_whatsapp_share_url(invite_url: str, room: str | None = None, password: str | None = None) -> str:
     room_label = f" untuk room {room}" if room else ""
+    password = str(password or "").strip()
+    password_line = f"\nPassword room: {password}" if password else "\nPassword room: minta ke pembuat room."
     text = (
-        f"Masuk ke AntiTrust{room_label}: {invite_url}\n\n"
-        "Catatan: link dan room bersifat sementara, maksimal aktif 60 menit."
+        f"Masuk ke AntiTrust{room_label}: {invite_url}"
+        f"{password_line}\n\n"
+        "Catatan: link, room, dan password bersifat sementara. Jangan teruskan ke orang yang tidak dipercaya."
     )
     return "https://wa.me/?" + urlencode({"text": text})
 
 
-def render_whatsapp_share(invite_url: str, room: str | None = None) -> None:
+def render_whatsapp_share(invite_url: str, room: str | None = None, password: str | None = None) -> None:
     if not invite_url:
         return
-    st.link_button("Share WhatsApp", build_whatsapp_share_url(invite_url, room), use_container_width=True)
+    st.link_button("Share WhatsApp", build_whatsapp_share_url(invite_url, room, password), use_container_width=True)
 
 
 def make_qr_png(data: str) -> bytes | None:
@@ -2711,6 +2738,7 @@ def render_admin_panel() -> None:
             st.session_state["last_invite"] = build_invite_url(token)
             st.session_state["last_invite_token"] = token
             st.session_state["last_room"] = room
+            st.session_state["last_room_share_password"] = str(admin_room_password or "")
             st.session_state["last_invite_display_until"] = now_epoch() + 60
             st.success(f"Room otomatis `{room}` berhasil dibuat untuk {ttl_label}. Link hanya ditampilkan 1 menit, tanpa revoke.")
         if render_temporary_invite_link(
@@ -2720,6 +2748,7 @@ def render_admin_panel() -> None:
             display_until_key="last_invite_display_until",
             input_key="admin_invite_box",
             label="Link hilang dari halaman dalam",
+            password_key="last_room_share_password",
         ):
             if st.session_state.get("last_room"):
                 render_countdown("Sisa waktu room", room_seconds_left(st.session_state.get("last_room")))
@@ -2735,7 +2764,7 @@ def render_public_room_creator() -> None:
     st.markdown('<div class="terminal-card">', unsafe_allow_html=True)
     st.markdown('<div class="terminal-note">$ create_room --anonymous --random --temporary-link</div>', unsafe_allow_html=True)
     st.subheader("Buat room")
-    st.caption("Nama room dibuat otomatis dan acak. Password pembuat room juga menjadi dasar Fernet key unik room. Link hanya tampil 1 menit, tanpa revoke.")
+    st.caption("Nama room dibuat otomatis dan acak. Password pembuat room juga menjadi dasar Fernet key unik room. Link hanya tampil 1 menit, tanpa revoke. Tombol Share WhatsApp ikut menyertakan password room.")
     creator_password = st.text_input("Password pembuat room / key Fernet", type="password", help="Password ini dipakai untuk membuka enkripsi room, revoke room, dan hapus chat. Bagikan secara terpisah dari link.", key="public_creator_room_password")
     ttl = st.slider("Durasi room", min_value=1, max_value=ROOM_MAX_TTL_MINUTES, value=ROOM_DEFAULT_TTL_MINUTES, help="Maksimal 60 menit. Tampilan link hilang otomatis setelah 1 menit, tanpa revoke.", key="public_room_ttl")
     if st.button("Create random room + link", use_container_width=True):
@@ -2748,6 +2777,7 @@ def render_public_room_creator() -> None:
         st.session_state["public_invite_url"] = build_invite_url(token)
         st.session_state["public_invite_token"] = token
         st.session_state["public_room"] = room
+        st.session_state["public_room_share_password"] = str(creator_password or "")
         st.session_state["public_invite_display_until"] = now_epoch() + 60
         st.success(f"Room otomatis `{room}` berhasil dibuat. Link hanya ditampilkan 1 menit, tanpa revoke.")
     if st.session_state.get("public_invite_url"):
@@ -2760,6 +2790,7 @@ def render_public_room_creator() -> None:
                 display_until_key="public_invite_display_until",
                 input_key="public_invite_box",
                 label="Link hilang dari halaman dalam",
+                password_key="public_room_share_password",
             )
         with col2:
             render_countdown("Sisa waktu room", room_seconds_left(st.session_state.get("public_room")))
@@ -2885,6 +2916,7 @@ def render_room_invite_panel(room: str, username: str) -> None:
                 token_key="room_invite_token",
                 input_key="room_invite_url_box",
                 label="Sisa waktu invite link",
+                password=st.session_state.get(room_share_password_session_key(room)),
             )
 
 
