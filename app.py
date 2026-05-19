@@ -844,8 +844,9 @@ def get_fernet() -> Fernet:
 
 # Metadata penting seperti invite link tetap memakai Fernet global agar link lama
 # tidak rusak. Isi pesan dan packet room baru dienkripsi dengan Fernet unik
-# yang diturunkan dari Password pembuat room.
-ROOM_CRYPTO_VERSION = 2
+# yang diturunkan otomatis dari nama room acak. Penerima invite tidak perlu
+# password tambahan; cukup buka link dan isi username.
+ROOM_CRYPTO_VERSION = 3
 ROOM_KDF_ITERATIONS = 390_000
 ROOM_SALT_BYTES = 16
 
@@ -881,6 +882,7 @@ def _b64decode(value: str) -> bytes:
 
 
 def room_crypto_session_key(room: str) -> str:
+    # Key tidak perlu disimpan di session; ini hanya dipertahankan agar state lama aman.
     return "room_fernet_key::" + room_key(room)
 
 
@@ -890,36 +892,37 @@ def room_crypto_salt(room: str) -> str:
 
 
 def room_encryption_enabled(room: str) -> bool:
-    config = get_room_config(room)
-    return bool(config.get("room_fernet_salt"))
+    return bool(clean_room_name(room))
 
 
-def derive_room_fernet_key(room: str, password: str, salt_b64: str) -> bytes:
-    """Turunkan Fernet key unik per room dari password pembuat room.
+def derive_room_fernet_key(room: str, salt_b64: str = "") -> bytes:
+    """Turunkan Fernet key unik otomatis dari nama room acak.
 
-    Password asli tidak disimpan. Salt disimpan di room_settings.json, sedangkan
-    CHAT_ADMIN_PASSWORD/FERNET_KEY dipakai sebagai server-side pepper supaya hasil
-    KDF tidak hanya bergantung pada password user.
+    Tidak ada password tambahan untuk penerima invite. Room name dibuat acak
+    dengan entropy tinggi dan tidak diketik manual oleh user. FERNET_KEY dan
+    CHAT_ADMIN_PASSWORD tetap dipakai sebagai server-side pepper agar key tidak
+    hanya bergantung pada nama room mentah.
     """
-    password = str(password or "")
-    if not password:
-        raise ValueError("Password pembuat room kosong.")
-    salt = _b64decode(salt_b64)
+    clean_room = clean_room_name(room)
+    if not clean_room:
+        raise ValueError("Nama room kosong.")
+    if salt_b64:
+        salt = _b64decode(salt_b64)
+    else:
+        # Fallback stabil untuk room lama yang belum punya salt tersimpan.
+        salt = hashlib.sha256(("room-salt::" + room_key(clean_room)).encode("utf-8")).digest()[:ROOM_SALT_BYTES]
     pepper = hashlib.sha256(get_fernet_key() + get_secret("CHAT_ADMIN_PASSWORD", "").encode("utf-8")).digest()
-    material = password.encode("utf-8") + b"::" + pepper
-    context_salt = salt + room_key(room).encode("utf-8")
+    material = clean_room.encode("utf-8") + b"::" + room_key(clean_room).encode("utf-8") + b"::" + pepper
+    context_salt = salt + b"::antitrust-room-name-fernet-v3"
     raw_key = hashlib.pbkdf2_hmac("sha256", material, context_salt, ROOM_KDF_ITERATIONS, dklen=32)
     return base64.urlsafe_b64encode(raw_key)
 
 
 def remember_room_password(room: str, password: str) -> bool:
+    # Backward compatibility untuk aksi pembuat room lama yang masih punya password.
     clean_password = str(password or "")
     if not verify_room_creator_password(room, clean_password):
         return False
-    salt = room_crypto_salt(room)
-    if salt:
-        st.session_state[room_crypto_session_key(room)] = derive_room_fernet_key(room, clean_password, salt).decode("ascii")
-    # Password yang benar juga membuka aksi pembuat room.
     st.session_state[room_creator_session_key(room)] = True
     return True
 
@@ -927,11 +930,8 @@ def remember_room_password(room: str, password: str) -> bool:
 def get_room_fernet(room: str) -> Fernet | None:
     if not room_encryption_enabled(room):
         return None
-    key = str(st.session_state.get(room_crypto_session_key(room), "") or "")
-    if not key:
-        return None
     try:
-        return Fernet(key.encode("ascii"))
+        return Fernet(derive_room_fernet_key(room, room_crypto_salt(room)))
     except Exception:
         return None
 
@@ -939,7 +939,6 @@ def get_room_fernet(room: str) -> Fernet | None:
 def encrypt_room_text(room: str, text: str) -> str:
     fernet = get_room_fernet(room)
     if fernet is None:
-        # Legacy/fallback: room lama yang belum memakai password-derived key.
         return encrypt_text(text)
     return fernet.encrypt(text.encode("utf-8")).decode("utf-8")
 
@@ -1192,13 +1191,15 @@ def clean_room_name(room: str) -> str:
 
 
 def generate_random_room_name(prefix: str = "room") -> str:
-    """Create a random room name so users do not need to type one manually."""
+    """Create a high-entropy automatic room name used as room key material."""
     settings = load_json(ROOM_SETTINGS_FILE)
+    safe_prefix = "".join(ch for ch in str(prefix or "room").lower() if ch.isalnum() or ch == "-")[:16] or "room"
     for _ in range(20):
-        candidate = clean_room_name(f"{prefix}-{secrets.token_hex(3)}-{secrets.token_hex(2)}")
+        random_part = secrets.token_urlsafe(18).replace("_", "").replace("-", "").lower()[:24]
+        candidate = clean_room_name(f"{safe_prefix}-{random_part}")
         if room_key(candidate) not in settings:
             return candidate
-    return clean_room_name(f"{prefix}-{secrets.token_urlsafe(8).replace('_', '').replace('-', '').lower()[:10]}")
+    return clean_room_name(f"{safe_prefix}-{secrets.token_hex(16)}")
 
 def normalize_display_name(name: str) -> str:
     return " ".join(str(name or "").strip().split())
@@ -1355,9 +1356,8 @@ def set_room_creator_password(room: str, password: str) -> None:
     config["creator_password_hash"] = creator_password_digest(room, clean_password)
     if not config.get("room_fernet_salt"):
         config["room_fernet_salt"] = _b64encode(secrets.token_bytes(ROOM_SALT_BYTES))
-        config["room_crypto_version"] = ROOM_CRYPTO_VERSION
+    config["room_crypto_version"] = ROOM_CRYPTO_VERSION
     save_room_config(room, config)
-    st.session_state[room_crypto_session_key(room)] = derive_room_fernet_key(room, clean_password, str(config.get("room_fernet_salt", ""))).decode("ascii")
 
 
 def verify_room_creator_password(room: str, password: str) -> bool:
@@ -1390,7 +1390,7 @@ def render_room_creator_unlock(room: str, context_key: str = "default") -> bool:
     password = st.text_input("Password pembuat room", type="password", key=f"creator_password_unlock::{safe_context}::{room_key(room)}")
     if st.button("Unlock aksi pembuat", use_container_width=True, key=f"creator_unlock_btn::{safe_context}::{room_key(room)}"):
         if remember_room_password(room, password):
-            st.success("Akses pembuat aktif dan key Fernet room sudah dibuka.")
+            st.success("Akses pembuat aktif.")
             st.rerun()
         else:
             st.error("Password pembuat salah.")
@@ -1416,11 +1416,9 @@ def ensure_room_config(
             config["room_cipher"] = encrypt_text(room)
         if str(creator_password or "").strip() and not config.get("creator_password_hash"):
             config["creator_password_hash"] = creator_password_digest(room, creator_password)
-        if str(creator_password or "").strip() and not config.get("room_fernet_salt"):
+        if not config.get("room_fernet_salt"):
             config["room_fernet_salt"] = _b64encode(secrets.token_bytes(ROOM_SALT_BYTES))
-            config["room_crypto_version"] = ROOM_CRYPTO_VERSION
-        if str(creator_password or "").strip() and config.get("room_fernet_salt"):
-            st.session_state[room_crypto_session_key(room)] = derive_room_fernet_key(room, creator_password, str(config.get("room_fernet_salt", ""))).decode("ascii")
+        config["room_crypto_version"] = ROOM_CRYPTO_VERSION
         settings[key] = config
         atomic_write_json(ROOM_SETTINGS_FILE, settings)
         return config
@@ -1434,12 +1432,11 @@ def ensure_room_config(
         "auto_destroy_minutes": min(DEFAULT_DESTROY_MINUTES, lifetime_minutes),
         "last_active_at": now,
         "destroyed_at": 0,
+        # Password pembuat room hanya opsional untuk aksi sensitif lama; bukan bahan key Fernet.
         "creator_password_hash": creator_password_digest(room, creator_password) if str(creator_password or "").strip() else "",
-        "room_fernet_salt": _b64encode(secrets.token_bytes(ROOM_SALT_BYTES)) if str(creator_password or "").strip() else "",
-        "room_crypto_version": ROOM_CRYPTO_VERSION if str(creator_password or "").strip() else 1,
+        "room_fernet_salt": _b64encode(secrets.token_bytes(ROOM_SALT_BYTES)),
+        "room_crypto_version": ROOM_CRYPTO_VERSION,
     }
-    if str(creator_password or "").strip() and config.get("room_fernet_salt"):
-        st.session_state[room_crypto_session_key(room)] = derive_room_fernet_key(room, creator_password, str(config.get("room_fernet_salt", ""))).decode("ascii")
     settings[key] = config
     atomic_write_json(ROOM_SETTINGS_FILE, settings)
     return config
@@ -2672,7 +2669,7 @@ def render_admin_panel() -> None:
             return
 
         st.success("Admin aktif")
-        st.caption("Nama room dibuat otomatis dan acak. Room baru memakai Fernet key unik dari Password pembuat room. Simpan password ini karena dibutuhkan untuk membuka isi chat.")
+        st.caption("Nama room dibuat otomatis dan acak. Nama room otomatis menjadi bahan Fernet key unik, jadi penerima link cukup isi username untuk chat.")
         admin_duration_options = {
             "1 jam": 60,
             "3 jam": 180,
@@ -2689,22 +2686,12 @@ def render_admin_panel() -> None:
             help="Khusus admin bisa membuat room lebih lama, maksimal 7 hari. Tampilan link tetap hanya muncul 1 menit setelah dibuat, tanpa revoke.",
         )
         ttl = admin_duration_options[ttl_label]
-        admin_room_password = st.text_input(
-            "Password pembuat room",
-            type="password",
-            help="Password ini menurunkan Fernet key unik per room. Bagikan password secara terpisah dari invite link.",
-            key="admin_creator_room_password",
-        )
         if st.button("Buat room otomatis + invite link", use_container_width=True):
-            if len(str(admin_room_password or "").strip()) < 8:
-                st.warning("Password pembuat room minimal 8 karakter agar key Fernet lebih kuat.")
-                return
             room = generate_random_room_name("admin")
             token = create_room_with_invite(
                 room,
                 int(ttl),
                 "admin",
-                admin_room_password,
                 max_lifetime_minutes=ADMIN_ROOM_MAX_TTL_MINUTES,
                 max_invite_ttl_minutes=ADMIN_ROOM_MAX_TTL_MINUTES,
             )
@@ -2735,16 +2722,11 @@ def render_public_room_creator() -> None:
     st.markdown('<div class="terminal-card">', unsafe_allow_html=True)
     st.markdown('<div class="terminal-note">$ create_room --anonymous --random --temporary-link</div>', unsafe_allow_html=True)
     st.subheader("Buat room")
-    st.caption("Nama room dibuat otomatis dan acak. Masukkan password untuk dijadikan kunci room. Segera copy link yang didapatkan dan share link bersama kunci room ke lawan bicara.")
-    creator_password = st.text_input("Password pembuat room", type="password", help="Password ini dipakai untuk membuka enkripsi room, revoke room, dan hapus chat. Bagikan secara terpisah dari link.", key="public_creator_room_password")
+    st.caption("Nama room dibuat otomatis dan acak. Nama room otomatis menjadi dasar Fernet key unik room. Penerima link cukup isi username, tanpa password tambahan.")
     ttl = st.slider("Durasi room", min_value=1, max_value=ROOM_MAX_TTL_MINUTES, value=ROOM_DEFAULT_TTL_MINUTES, help="Maksimal 60 menit. Tampilan link hilang otomatis setelah 1 menit, tanpa revoke.", key="public_room_ttl")
     if st.button("Create random room + link", use_container_width=True):
-        if len(str(creator_password or "").strip()) < 8:
-            st.warning("Password pembuat room minimal 8 karakter agar key Fernet lebih kuat.")
-            st.markdown('</div>', unsafe_allow_html=True)
-            return
         room = generate_random_room_name("anon")
-        token = create_room_with_invite(room, int(ttl), "anonymous", creator_password)
+        token = create_room_with_invite(room, int(ttl), "anonymous")
         st.session_state["public_invite_url"] = build_invite_url(token)
         st.session_state["public_invite_token"] = token
         st.session_state["public_room"] = room
@@ -3285,32 +3267,11 @@ def render_compact_room_panel(room: str, username: str, messages: list[dict[str,
 
 
 def render_room_password_unlock(room: str) -> bool:
-    """Wajibkan password pembuat room untuk membuka Fernet key room.
-
-    Room lama tanpa room_fernet_salt tetap bisa dipakai tanpa langkah ini.
-    """
-    if not room_encryption_enabled(room):
-        return True
-    if get_room_fernet(room) is not None:
-        st.caption("🔑 Key Fernet room aktif di sesi ini.")
-        return True
-
-    st.markdown('<div class="terminal-card">', unsafe_allow_html=True)
-    st.markdown('<div class="terminal-note">$ unlock_room_key --password-derived-fernet</div>', unsafe_allow_html=True)
-    st.subheader("Unlock enkripsi room")
-    st.caption("Room ini memakai Fernet key unik yang diturunkan dari Password pembuat room. Masukkan password yang dibuat saat room dibuat.")
-    with st.form(f"room_crypto_unlock::{room_key(room)}"):
-        password = st.text_input("Password pembuat room", type="password")
-        submitted = st.form_submit_button("Unlock room", use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-    if not submitted:
+    """Room-name-derived Fernet tidak membutuhkan password unlock."""
+    if get_room_fernet(room) is None:
+        st.error("Key Fernet room gagal dibuat otomatis.")
         return False
-    if remember_room_password(room, password):
-        st.success("Room berhasil dibuka. Key Fernet unik aktif untuk sesi ini.")
-        st.rerun()
-        return True
-    st.error("Password pembuat room salah atau key tidak cocok.")
-    return False
+    return True
 
 
 def render_invite_expiry_redirect(seconds_left: int) -> None:
@@ -3379,8 +3340,7 @@ def main() -> None:
     with col_timer2:
         render_countdown("Sisa waktu invite link", current_invite_left)
     render_invite_expiry_redirect(current_invite_left)
-    if not render_room_password_unlock(room):
-        return
+    # Key Fernet dibuat otomatis dari nama room acak; penerima link langsung lanjut isi username.
     # Jangan auto-refresh tiap detik; countdown berjalan di browser agar halaman tidak naik sendiri.
     username = get_locked_username(is_admin=bool(st.session_state.get("admin_ok")))
     if not username:
