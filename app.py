@@ -2736,7 +2736,7 @@ def render_public_room_creator() -> None:
     st.markdown('<div class="terminal-note">$ create_room --anonymous --random --temporary-link</div>', unsafe_allow_html=True)
     st.subheader("Buat room")
     st.caption("Nama room dibuat otomatis dan acak. Password pembuat room juga menjadi dasar Fernet key unik room. Link hanya tampil 1 menit, tanpa revoke.")
-    creator_password = st.text_input("Password pembuat room / key Fernet", type="password", help="Password ini dipakai untuk membuka enkripsi room, revoke room, dan hapus chat. Bagikan secara terpisah dari link.", key="public_creator_room_password")
+    creator_password = st.text_input("Password pembuat room", type="password", help="Password ini dipakai untuk membuka enkripsi room, revoke room, dan hapus chat. Bagikan secara terpisah dari link.", key="public_creator_room_password")
     ttl = st.slider("Durasi room", min_value=1, max_value=ROOM_MAX_TTL_MINUTES, value=ROOM_DEFAULT_TTL_MINUTES, help="Maksimal 60 menit. Tampilan link hilang otomatis setelah 1 menit, tanpa revoke.", key="public_room_ttl")
     if st.button("Create random room + link", use_container_width=True):
         if len(str(creator_password or "").strip()) < 8:
