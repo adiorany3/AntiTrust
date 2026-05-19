@@ -3098,7 +3098,7 @@ def render_feature_panel(room: str, username: str, messages: list[dict[str, Any]
 def render_message_form(room: str, username: str) -> None:
     with st.container(border=True):
         st.markdown("**Kirim**")
-        tab_text, tab_ping, tab_special, tab_self, tab_img, tab_voice, tab_doc = st.tabs(["Text |", "Ping |", "Secret |", "Self-destruct |", "Image |", "Voice |", "Doc"])
+        tab_text, tab_ping, tab_special, tab_self, tab_img, tab_voice, tab_doc = st.tabs(["Text |", "| Ping |", "| Secret |", "| Self-destruct |", "| Image |", "| Voice |", "| Doc |"])
         with tab_text:
             with st.form("text-message", clear_on_submit=True):
                 message = st.text_input(
