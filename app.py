@@ -842,6 +842,14 @@ def get_fernet() -> Fernet:
     return Fernet(get_fernet_key())
 
 
+# Metadata penting seperti invite link tetap memakai Fernet global agar link lama
+# tidak rusak. Isi pesan dan packet room baru dienkripsi dengan Fernet unik
+# yang diturunkan dari Password pembuat room.
+ROOM_CRYPTO_VERSION = 2
+ROOM_KDF_ITERATIONS = 390_000
+ROOM_SALT_BYTES = 16
+
+
 def encrypt_text(text: str) -> str:
     return get_fernet().encrypt(text.encode("utf-8")).decode("utf-8")
 
@@ -862,6 +870,106 @@ def decrypt_bytes(data: bytes) -> bytes | None:
         return get_fernet().decrypt(data)
     except InvalidToken:
         return None
+
+
+def _b64encode(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).decode("ascii")
+
+
+def _b64decode(value: str) -> bytes:
+    return base64.urlsafe_b64decode(str(value or "").encode("ascii"))
+
+
+def room_crypto_session_key(room: str) -> str:
+    return "room_fernet_key::" + room_key(room)
+
+
+def room_crypto_salt(room: str) -> str:
+    config = get_room_config(room)
+    return str(config.get("room_fernet_salt", "") or "")
+
+
+def room_encryption_enabled(room: str) -> bool:
+    config = get_room_config(room)
+    return bool(config.get("room_fernet_salt"))
+
+
+def derive_room_fernet_key(room: str, password: str, salt_b64: str) -> bytes:
+    """Turunkan Fernet key unik per room dari password pembuat room.
+
+    Password asli tidak disimpan. Salt disimpan di room_settings.json, sedangkan
+    CHAT_ADMIN_PASSWORD/FERNET_KEY dipakai sebagai server-side pepper supaya hasil
+    KDF tidak hanya bergantung pada password user.
+    """
+    password = str(password or "")
+    if not password:
+        raise ValueError("Password pembuat room kosong.")
+    salt = _b64decode(salt_b64)
+    pepper = hashlib.sha256(get_fernet_key() + get_secret("CHAT_ADMIN_PASSWORD", "").encode("utf-8")).digest()
+    material = password.encode("utf-8") + b"::" + pepper
+    context_salt = salt + room_key(room).encode("utf-8")
+    raw_key = hashlib.pbkdf2_hmac("sha256", material, context_salt, ROOM_KDF_ITERATIONS, dklen=32)
+    return base64.urlsafe_b64encode(raw_key)
+
+
+def remember_room_password(room: str, password: str) -> bool:
+    clean_password = str(password or "")
+    if not verify_room_creator_password(room, clean_password):
+        return False
+    salt = room_crypto_salt(room)
+    if salt:
+        st.session_state[room_crypto_session_key(room)] = derive_room_fernet_key(room, clean_password, salt).decode("ascii")
+    # Password yang benar juga membuka aksi pembuat room.
+    st.session_state[room_creator_session_key(room)] = True
+    return True
+
+
+def get_room_fernet(room: str) -> Fernet | None:
+    if not room_encryption_enabled(room):
+        return None
+    key = str(st.session_state.get(room_crypto_session_key(room), "") or "")
+    if not key:
+        return None
+    try:
+        return Fernet(key.encode("ascii"))
+    except Exception:
+        return None
+
+
+def encrypt_room_text(room: str, text: str) -> str:
+    fernet = get_room_fernet(room)
+    if fernet is None:
+        # Legacy/fallback: room lama yang belum memakai password-derived key.
+        return encrypt_text(text)
+    return fernet.encrypt(text.encode("utf-8")).decode("utf-8")
+
+
+def decrypt_room_text(room: str, token: str) -> str:
+    fernet = get_room_fernet(room)
+    if fernet is not None:
+        try:
+            return fernet.decrypt(str(token).encode("utf-8")).decode("utf-8")
+        except Exception:
+            pass
+    # Backward compatibility untuk pesan lama yang masih terenkripsi global.
+    return decrypt_text(token)
+
+
+def encrypt_room_bytes(room: str, data: bytes) -> bytes:
+    fernet = get_room_fernet(room)
+    if fernet is None:
+        return encrypt_bytes(data)
+    return fernet.encrypt(data)
+
+
+def decrypt_room_bytes(room: str, data: bytes) -> bytes | None:
+    fernet = get_room_fernet(room)
+    if fernet is not None:
+        try:
+            return fernet.decrypt(data)
+        except InvalidToken:
+            pass
+    return decrypt_bytes(data)
 
 
 def now_epoch() -> int:
@@ -1039,7 +1147,7 @@ def save_packet(room: str, message_id: str, data: bytes) -> str:
     directory = packet_room_dir(room)
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{message_id}.bin"
-    path.write_bytes(encrypt_bytes(data))
+    path.write_bytes(encrypt_room_bytes(room, data))
     return path.relative_to(DATA_DIR).as_posix()
 
 
@@ -1054,11 +1162,11 @@ def resolve_packet_path(relative_path: str) -> Path | None:
     return candidate if candidate.is_file() else None
 
 
-def read_packet(relative_path: str) -> bytes | None:
+def read_packet(room: str, relative_path: str) -> bytes | None:
     path = resolve_packet_path(relative_path)
     if path is None:
         return None
-    return decrypt_bytes(path.read_bytes())
+    return decrypt_room_bytes(room, path.read_bytes())
 
 
 def delete_room_packets(room: str) -> None:
@@ -1217,6 +1325,8 @@ def get_room_config(room: str) -> dict[str, Any]:
         "destroyed_at": int(config.get("destroyed_at", 0)),
         "pinned_message_id": str(config.get("pinned_message_id", "") or ""),
         "creator_password_hash": str(config.get("creator_password_hash", "") or ""),
+        "room_fernet_salt": str(config.get("room_fernet_salt", "") or ""),
+        "room_crypto_version": int(config.get("room_crypto_version", 1 if not config.get("room_fernet_salt") else ROOM_CRYPTO_VERSION)),
     }
 
 
@@ -1243,7 +1353,11 @@ def set_room_creator_password(room: str, password: str) -> None:
         return
     config = get_room_config(room)
     config["creator_password_hash"] = creator_password_digest(room, clean_password)
+    if not config.get("room_fernet_salt"):
+        config["room_fernet_salt"] = _b64encode(secrets.token_bytes(ROOM_SALT_BYTES))
+        config["room_crypto_version"] = ROOM_CRYPTO_VERSION
     save_room_config(room, config)
+    st.session_state[room_crypto_session_key(room)] = derive_room_fernet_key(room, clean_password, str(config.get("room_fernet_salt", ""))).decode("ascii")
 
 
 def verify_room_creator_password(room: str, password: str) -> bool:
@@ -1275,9 +1389,8 @@ def render_room_creator_unlock(room: str, context_key: str = "default") -> bool:
     safe_context = hashlib.sha1(str(context_key).encode("utf-8")).hexdigest()[:10]
     password = st.text_input("Password pembuat room", type="password", key=f"creator_password_unlock::{safe_context}::{room_key(room)}")
     if st.button("Unlock aksi pembuat", use_container_width=True, key=f"creator_unlock_btn::{safe_context}::{room_key(room)}"):
-        if verify_room_creator_password(room, password):
-            st.session_state[room_creator_session_key(room)] = True
-            st.success("Akses pembuat aktif.")
+        if remember_room_password(room, password):
+            st.success("Akses pembuat aktif dan key Fernet room sudah dibuka.")
             st.rerun()
         else:
             st.error("Password pembuat salah.")
@@ -1303,6 +1416,11 @@ def ensure_room_config(
             config["room_cipher"] = encrypt_text(room)
         if str(creator_password or "").strip() and not config.get("creator_password_hash"):
             config["creator_password_hash"] = creator_password_digest(room, creator_password)
+        if str(creator_password or "").strip() and not config.get("room_fernet_salt"):
+            config["room_fernet_salt"] = _b64encode(secrets.token_bytes(ROOM_SALT_BYTES))
+            config["room_crypto_version"] = ROOM_CRYPTO_VERSION
+        if str(creator_password or "").strip() and config.get("room_fernet_salt"):
+            st.session_state[room_crypto_session_key(room)] = derive_room_fernet_key(room, creator_password, str(config.get("room_fernet_salt", ""))).decode("ascii")
         settings[key] = config
         atomic_write_json(ROOM_SETTINGS_FILE, settings)
         return config
@@ -1317,7 +1435,11 @@ def ensure_room_config(
         "last_active_at": now,
         "destroyed_at": 0,
         "creator_password_hash": creator_password_digest(room, creator_password) if str(creator_password or "").strip() else "",
+        "room_fernet_salt": _b64encode(secrets.token_bytes(ROOM_SALT_BYTES)) if str(creator_password or "").strip() else "",
+        "room_crypto_version": ROOM_CRYPTO_VERSION if str(creator_password or "").strip() else 1,
     }
+    if str(creator_password or "").strip() and config.get("room_fernet_salt"):
+        st.session_state[room_crypto_session_key(room)] = derive_room_fernet_key(room, creator_password, str(config.get("room_fernet_salt", ""))).decode("ascii")
     settings[key] = config
     atomic_write_json(ROOM_SETTINGS_FILE, settings)
     return config
@@ -1501,7 +1623,8 @@ def append_text(room: str, username: str, text: str, ttl_seconds: int = 0) -> No
         "id": secrets.token_urlsafe(18),
         "type": "text",
         "username": username,
-        "text": encrypt_text(clean),
+        "text": encrypt_room_text(room, clean),
+        "crypto_version": ROOM_CRYPTO_VERSION if room_encryption_enabled(room) else 1,
         "time": now_wib_label(),
         "created_at": now,
         "expires_at": now + int(ttl_seconds) if int(ttl_seconds or 0) > 0 else 0,
@@ -1537,19 +1660,19 @@ def append_ping(room: str, username: str) -> None:
     append_special_message(room, username, "ping", {})
 
 
-def message_summary(msg: dict[str, Any]) -> str:
+def message_summary(msg: dict[str, Any], room: str = "") -> str:
     msg_type = str(msg.get("type", "text"))
     sender = normalize_display_name(str(msg.get("username", "unknown")))
     if msg_type == "text":
-        body = decrypt_text(str(msg.get("text", "")))[:42]
+        body = decrypt_room_text(room, str(msg.get("text", "")))[:42]
     elif msg_type in {"secret_note", "one_time"}:
-        body = decrypt_text(str(msg.get("text", "")))[:42]
+        body = decrypt_room_text(room, str(msg.get("text", "")))[:42]
     elif msg_type == "poll":
-        body = decrypt_text(str(msg.get("question", "")))[:42]
+        body = decrypt_room_text(room, str(msg.get("question", "")))[:42]
     elif msg_type == "checklist":
-        body = decrypt_text(str(msg.get("title", "Checklist")))[:42]
+        body = decrypt_room_text(room, str(msg.get("title", "Checklist")))[:42]
     elif msg_type == "location":
-        body = decrypt_text(str(msg.get("label", "Location")))[:42]
+        body = decrypt_room_text(room, str(msg.get("label", "Location")))[:42]
     elif msg_type == "ping":
         body = "PING"
     else:
@@ -1708,7 +1831,8 @@ def append_media(room: str, username: str, media_type: str, data: bytes, mime_ty
     if media_type == "image":
         thumb, thumb_mime = make_thumbnail(data)
         if thumb:
-            message["thumbnail"] = encrypt_text(thumb)
+            message["thumbnail"] = encrypt_room_text(room, thumb)
+            message["crypto_version"] = ROOM_CRYPTO_VERSION if room_encryption_enabled(room) else 1
             message["thumbnail_mime"] = thumb_mime
     rooms[key].append(message)
     atomic_write_json(CHAT_FILE, rooms)
@@ -2179,7 +2303,7 @@ def user_hue(username: str) -> int:
     return int(digest[:8], 16) % 360
 
 
-def render_chat(messages: list[dict[str, Any]], username: str) -> str:
+def render_chat(messages: list[dict[str, Any]], username: str, room: str = "") -> str:
     if not messages:
         return CHAT_CSS + """
         <div id="antitrust-chat-box" class="chat"><div class="empty">Belum ada pesan. Mulai percakapan aman.</div><div id="antitrust-chat-bottom"></div></div>
@@ -2201,27 +2325,27 @@ def render_chat(messages: list[dict[str, Any]], username: str) -> str:
         time_label = html.escape(str(msg.get("time", "")))
         msg_type = str(msg.get("type", "text"))
         if msg_type == "text":
-            content = html.escape(decrypt_text(str(msg.get("text", ""))))
+            content = html.escape(decrypt_room_text(room, str(msg.get("text", ""))))
         elif msg_type == "secret_note":
             content = '<span class="secret">🔒 Secret Note</span><small>Buka lewat panel Fitur.</small>'
         elif msg_type == "one_time":
             content = '<span class="secret">👁️ One-Time Message</span><small>Buka sekali lewat panel Fitur, lalu pesan terhapus.</small>'
         elif msg_type == "poll":
-            question = html.escape(decrypt_text(str(msg.get("question", ""))))
+            question = html.escape(decrypt_room_text(room, str(msg.get("question", ""))))
             votes = msg.get("votes") if isinstance(msg.get("votes"), dict) else {}
             options = msg.get("options") if isinstance(msg.get("options"), list) else []
             counts = []
             for opt_token in options:
-                opt = decrypt_text(str(opt_token))
+                opt = decrypt_room_text(room, str(opt_token))
                 total = sum(1 for v in votes.values() if v == opt)
                 counts.append(f"{html.escape(opt)}: {total}")
             content = f'<span class="poll">📊 Poll</span>{question}<br><small>{" · ".join(counts)}</small>'
         elif msg_type == "location":
-            label = html.escape(decrypt_text(str(msg.get("label", "Lokasi"))))
-            url = html.escape(decrypt_text(str(msg.get("url", ""))), quote=True)
+            label = html.escape(decrypt_room_text(room, str(msg.get("label", "Lokasi"))))
+            url = html.escape(decrypt_room_text(room, str(msg.get("url", ""))), quote=True)
             content = f'<span class="location">📍 Location Pin</span><a href="{url}" target="_blank" rel="noopener noreferrer">{label}</a>'
         elif msg_type == "checklist":
-            title = html.escape(decrypt_text(str(msg.get("title", "Checklist"))))
+            title = html.escape(decrypt_room_text(room, str(msg.get("title", "Checklist"))))
             items = msg.get("items") if isinstance(msg.get("items"), list) else []
             checked = msg.get("checked") if isinstance(msg.get("checked"), dict) else {}
             done = sum(1 for i in range(len(items)) if checked.get(str(i)))
@@ -2234,7 +2358,7 @@ def render_chat(messages: list[dict[str, Any]], username: str) -> str:
             label = {"image": "Image", "audio": "Voice", "document": "Document"}.get(msg_type, "Packet")
             content = f'<span class="packet">{label} Packet</span>{filename}<br><small>{size} · buka di Packet Viewer</small>'
             if msg_type == "image" and msg.get("thumbnail"):
-                thumb = decrypt_text(str(msg.get("thumbnail", "")))
+                thumb = decrypt_room_text(room, str(msg.get("thumbnail", "")))
                 mime = html.escape(str(msg.get("thumbnail_mime", "image/jpeg")))
                 if thumb and not thumb.startswith("["):
                     content += f'<img class="thumb" src="data:{mime};base64,{html.escape(thumb, quote=True)}" />'
@@ -2548,7 +2672,7 @@ def render_admin_panel() -> None:
             return
 
         st.success("Admin aktif")
-        st.caption("Nama room dibuat otomatis dan acak. Admin tidak perlu mengisi password pembuat room. Aksi revoke dan hapus chat tetap bisa dilakukan selama login admin aktif.")
+        st.caption("Nama room dibuat otomatis dan acak. Room baru memakai Fernet key unik dari Password pembuat room. Simpan password ini karena dibutuhkan untuk membuka isi chat.")
         admin_duration_options = {
             "1 jam": 60,
             "3 jam": 180,
@@ -2565,13 +2689,22 @@ def render_admin_panel() -> None:
             help="Khusus admin bisa membuat room lebih lama, maksimal 7 hari. Tampilan link tetap hanya muncul 1 menit setelah dibuat, tanpa revoke.",
         )
         ttl = admin_duration_options[ttl_label]
+        admin_room_password = st.text_input(
+            "Password pembuat room / key Fernet",
+            type="password",
+            help="Password ini menurunkan Fernet key unik per room. Bagikan password secara terpisah dari invite link.",
+            key="admin_creator_room_password",
+        )
         if st.button("Buat room otomatis + invite link", use_container_width=True):
+            if len(str(admin_room_password or "").strip()) < 8:
+                st.warning("Password pembuat room minimal 8 karakter agar key Fernet lebih kuat.")
+                return
             room = generate_random_room_name("admin")
             token = create_room_with_invite(
                 room,
                 int(ttl),
                 "admin",
-                "",
+                admin_room_password,
                 max_lifetime_minutes=ADMIN_ROOM_MAX_TTL_MINUTES,
                 max_invite_ttl_minutes=ADMIN_ROOM_MAX_TTL_MINUTES,
             )
@@ -2602,12 +2735,12 @@ def render_public_room_creator() -> None:
     st.markdown('<div class="terminal-card">', unsafe_allow_html=True)
     st.markdown('<div class="terminal-note">$ create_room --anonymous --random --temporary-link</div>', unsafe_allow_html=True)
     st.subheader("Buat room")
-    st.caption("Nama room dibuat otomatis dan acak. Kamu hanya perlu isi password pembuat room. Link hanya tampil 1 menit, tanpa revoke.")
-    creator_password = st.text_input("Password pembuat room", type="password", help="Password ini dipakai pembuat room untuk revoke room dan hapus chat.", key="public_creator_room_password")
+    st.caption("Nama room dibuat otomatis dan acak. Password pembuat room juga menjadi dasar Fernet key unik room. Link hanya tampil 1 menit, tanpa revoke.")
+    creator_password = st.text_input("Password pembuat room / key Fernet", type="password", help="Password ini dipakai untuk membuka enkripsi room, revoke room, dan hapus chat. Bagikan secara terpisah dari link.", key="public_creator_room_password")
     ttl = st.slider("Durasi room", min_value=1, max_value=ROOM_MAX_TTL_MINUTES, value=ROOM_DEFAULT_TTL_MINUTES, help="Maksimal 60 menit. Tampilan link hilang otomatis setelah 1 menit, tanpa revoke.", key="public_room_ttl")
     if st.button("Create random room + link", use_container_width=True):
-        if len(str(creator_password or "").strip()) < 4:
-            st.warning("Password pembuat room minimal 4 karakter.")
+        if len(str(creator_password or "").strip()) < 8:
+            st.warning("Password pembuat room minimal 8 karakter agar key Fernet lebih kuat.")
             st.markdown('</div>', unsafe_allow_html=True)
             return
         room = generate_random_room_name("anon")
@@ -2844,7 +2977,7 @@ def render_pinned_message(room: str, messages: list[dict[str, Any]]) -> None:
     if not msg:
         set_pinned_message(room, "")
         return
-    st.markdown(f'<div class="card"><b>📌 Pinned</b><br><span class="muted">{html.escape(message_summary(msg))}</span></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="card"><b>📌 Pinned</b><br><span class="muted">{html.escape(message_summary(msg, room))}</span></div>', unsafe_allow_html=True)
 
 
 def render_feature_panel(room: str, username: str, messages: list[dict[str, Any]]) -> None:
@@ -2856,10 +2989,10 @@ def render_feature_panel(room: str, username: str, messages: list[dict[str, Any]
                 st.caption("Belum ada Secret Note atau One-Time Message.")
             else:
                 msg_map = {str(m.get("id")): m for m in reversed(secret_messages)}
-                selected = st.selectbox("Pilih pesan rahasia", list(msg_map.keys()), format_func=lambda mid: message_summary(msg_map[mid]), key="secret_select")
+                selected = st.selectbox("Pilih pesan rahasia", list(msg_map.keys()), format_func=lambda mid: message_summary(msg_map[mid], room), key="secret_select")
                 if st.button("Buka pesan", use_container_width=True, key="open_secret_btn"):
                     msg = msg_map[selected]
-                    st.session_state["opened_secret_text"] = decrypt_text(str(msg.get("text", "")))
+                    st.session_state["opened_secret_text"] = decrypt_room_text(room, str(msg.get("text", "")))
                     st.session_state["opened_secret_type"] = str(msg.get("type"))
                     st.session_state["opened_secret_id"] = selected
                     if str(msg.get("type")) == "one_time":
@@ -2874,10 +3007,10 @@ def render_feature_panel(room: str, username: str, messages: list[dict[str, Any]
                 st.caption("Belum ada poll.")
             else:
                 poll_map = {str(m.get("id")): m for m in reversed(polls)}
-                selected_poll = st.selectbox("Pilih poll", list(poll_map.keys()), format_func=lambda mid: message_summary(poll_map[mid]), key="poll_select")
+                selected_poll = st.selectbox("Pilih poll", list(poll_map.keys()), format_func=lambda mid: message_summary(poll_map[mid], room), key="poll_select")
                 msg = poll_map[selected_poll]
-                question = decrypt_text(str(msg.get("question", "")))
-                options = [decrypt_text(str(x)) for x in msg.get("options", []) if isinstance(x, str)]
+                question = decrypt_room_text(room, str(msg.get("question", "")))
+                options = [decrypt_room_text(room, str(x)) for x in msg.get("options", []) if isinstance(x, str)]
                 votes = msg.get("votes") if isinstance(msg.get("votes"), dict) else {}
                 st.write(f"**{question}**")
                 selected_option = st.radio("Vote", options, index=options.index(votes.get(username)) if votes.get(username) in options else 0, key="poll_vote_radio") if options else None
@@ -2893,10 +3026,10 @@ def render_feature_panel(room: str, username: str, messages: list[dict[str, Any]
                 st.caption("Belum ada checklist.")
             else:
                 list_map = {str(m.get("id")): m for m in reversed(lists)}
-                selected_list = st.selectbox("Pilih checklist", list(list_map.keys()), format_func=lambda mid: message_summary(list_map[mid]), key="check_select")
+                selected_list = st.selectbox("Pilih checklist", list(list_map.keys()), format_func=lambda mid: message_summary(list_map[mid], room), key="check_select")
                 msg = list_map[selected_list]
-                st.write(f"**{decrypt_text(str(msg.get('title', 'Checklist')))}**")
-                items = [decrypt_text(str(x)) for x in msg.get("items", []) if isinstance(x, str)]
+                st.write(f"**{decrypt_room_text(room, str(msg.get('title', 'Checklist')))}**")
+                items = [decrypt_room_text(room, str(x)) for x in msg.get("items", []) if isinstance(x, str)]
                 state = msg.get("checked") if isinstance(msg.get("checked"), dict) else {}
                 for i, item in enumerate(items):
                     checked = st.checkbox(item, value=bool(state.get(str(i))), key=f"check_{selected_list}_{i}")
@@ -2908,7 +3041,7 @@ def render_feature_panel(room: str, username: str, messages: list[dict[str, Any]
                 st.caption("Belum ada pesan.")
             else:
                 msg_map = {str(m.get("id")): m for m in reversed(messages)}
-                selected_msg = st.selectbox("Pilih pesan", list(msg_map.keys()), format_func=lambda mid: message_summary(msg_map[mid]), key="react_select")
+                selected_msg = st.selectbox("Pilih pesan", list(msg_map.keys()), format_func=lambda mid: message_summary(msg_map[mid], room), key="react_select")
                 emoji = st.radio("Reaction", REACTION_CHOICES, horizontal=True, key="react_emoji")
                 if st.button("Toggle reaction", use_container_width=True, key="react_btn"):
                     add_reaction(room, selected_msg, username, emoji)
@@ -2918,7 +3051,7 @@ def render_feature_panel(room: str, username: str, messages: list[dict[str, Any]
                 st.caption("Belum ada pesan.")
             else:
                 msg_map = {str(m.get("id")): m for m in reversed(messages)}
-                selected_pin = st.selectbox("Pilih pesan untuk pin", list(msg_map.keys()), format_func=lambda mid: message_summary(msg_map[mid]), key="pin_select")
+                selected_pin = st.selectbox("Pilih pesan untuk pin", list(msg_map.keys()), format_func=lambda mid: message_summary(msg_map[mid], room), key="pin_select")
                 col_a, col_b = st.columns(2)
                 with col_a:
                     if st.button("Pin", use_container_width=True, key="pin_btn"):
@@ -2984,7 +3117,7 @@ def render_message_form(room: str, username: str) -> None:
                     submitted = st.form_submit_button("Kirim secret", use_container_width=True)
                     if submitted and not rate_limited("secret"):
                         msg_type = "secret_note" if kind == "Secret Note" else "one_time"
-                        append_special_message(room, username, msg_type, {"text": encrypt_text(secret_text.strip()[:MAX_TEXT_LENGTH])}, 0)
+                        append_special_message(room, username, msg_type, {"text": encrypt_room_text(room, secret_text.strip()[:MAX_TEXT_LENGTH]), "crypto_version": ROOM_CRYPTO_VERSION if room_encryption_enabled(room) else 1}, 0)
                         st.rerun()
             elif kind == "Poll Cepat":
                 with st.form("special-poll", clear_on_submit=True):
@@ -2996,7 +3129,7 @@ def render_message_form(room: str, username: str) -> None:
                         if not question.strip() or len(options) < 2:
                             st.warning("Poll butuh pertanyaan dan minimal 2 opsi.")
                         else:
-                            append_special_message(room, username, "poll", {"question": encrypt_text(question.strip()[:160]), "options": [encrypt_text(o) for o in options], "votes": {}}, 0)
+                            append_special_message(room, username, "poll", {"question": encrypt_room_text(room, question.strip()[:160]), "options": [encrypt_room_text(room, o) for o in options], "votes": {}, "crypto_version": ROOM_CRYPTO_VERSION if room_encryption_enabled(room) else 1}, 0)
                             st.rerun()
             elif kind == "Location Pin":
                 with st.form("special-location", clear_on_submit=True):
@@ -3007,7 +3140,7 @@ def render_message_form(room: str, username: str) -> None:
                         if not url.startswith(("https://", "http://")):
                             st.warning("Masukkan link lokasi yang valid.")
                         else:
-                            append_special_message(room, username, "location", {"label": encrypt_text((label or "Lokasi").strip()[:80]), "url": encrypt_text(url.strip()[:500])}, 0)
+                            append_special_message(room, username, "location", {"label": encrypt_room_text(room, (label or "Lokasi").strip()[:80]), "url": encrypt_room_text(room, url.strip()[:500]), "crypto_version": ROOM_CRYPTO_VERSION if room_encryption_enabled(room) else 1}, 0)
                             st.rerun()
             else:
                 with st.form("special-checklist", clear_on_submit=True):
@@ -3019,7 +3152,7 @@ def render_message_form(room: str, username: str) -> None:
                         if not items:
                             st.warning("Checklist minimal punya 1 item.")
                         else:
-                            append_special_message(room, username, "checklist", {"title": encrypt_text((title or "Checklist").strip()[:120]), "items": [encrypt_text(i) for i in items], "checked": {}}, 0)
+                            append_special_message(room, username, "checklist", {"title": encrypt_room_text(room, (title or "Checklist").strip()[:120]), "items": [encrypt_room_text(room, i) for i in items], "checked": {}, "crypto_version": ROOM_CRYPTO_VERSION if room_encryption_enabled(room) else 1}, 0)
                             st.rerun()
         with tab_img:
             image_reset = int(st.session_state.get("image_upload_reset", 0))
@@ -3085,7 +3218,7 @@ def render_packet_viewer(room: str, messages: list[dict[str, Any]]) -> None:
         st.caption("File asli baru didekripsi setelah tombol Buka ditekan.")
         return
 
-    data = read_packet(str(msg.get("packet_path", "")))
+    data = read_packet(room, str(msg.get("packet_path", "")))
     if data is None:
         st.error("Packet tidak ditemukan atau gagal didekripsi.")
         return
@@ -3149,6 +3282,35 @@ def render_compact_room_panel(room: str, username: str, messages: list[dict[str,
             render_room_actions(room, username)
             render_room_settings(room)
             render_panic(room)
+
+
+def render_room_password_unlock(room: str) -> bool:
+    """Wajibkan password pembuat room untuk membuka Fernet key room.
+
+    Room lama tanpa room_fernet_salt tetap bisa dipakai tanpa langkah ini.
+    """
+    if not room_encryption_enabled(room):
+        return True
+    if get_room_fernet(room) is not None:
+        st.caption("🔑 Key Fernet room aktif di sesi ini.")
+        return True
+
+    st.markdown('<div class="terminal-card">', unsafe_allow_html=True)
+    st.markdown('<div class="terminal-note">$ unlock_room_key --password-derived-fernet</div>', unsafe_allow_html=True)
+    st.subheader("Unlock enkripsi room")
+    st.caption("Room ini memakai Fernet key unik yang diturunkan dari Password pembuat room. Masukkan password yang dibuat saat room dibuat.")
+    with st.form(f"room_crypto_unlock::{room_key(room)}"):
+        password = st.text_input("Password pembuat room", type="password")
+        submitted = st.form_submit_button("Unlock room", use_container_width=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+    if not submitted:
+        return False
+    if remember_room_password(room, password):
+        st.success("Room berhasil dibuka. Key Fernet unik aktif untuk sesi ini.")
+        st.rerun()
+        return True
+    st.error("Password pembuat room salah atau key tidak cocok.")
+    return False
 
 
 def render_invite_expiry_redirect(seconds_left: int) -> None:
@@ -3217,6 +3379,8 @@ def main() -> None:
     with col_timer2:
         render_countdown("Sisa waktu invite link", current_invite_left)
     render_invite_expiry_redirect(current_invite_left)
+    if not render_room_password_unlock(room):
+        return
     # Jangan auto-refresh tiap detik; countdown berjalan di browser agar halaman tidak naik sendiri.
     username = get_locked_username(is_admin=bool(st.session_state.get("admin_ok")))
     if not username:
@@ -3252,7 +3416,7 @@ def main() -> None:
     render_message_focus_marker()
     # Height iframe dibuat pas dengan chat panel agar tidak ada ruang kosong besar
     # antara panel pesan dan form kirim.
-    components.html(render_chat(render_messages, username), height=430, scrolling=False)
+    components.html(render_chat(render_messages, username, room), height=430, scrolling=False)
     render_message_form(room, username)
     render_compose_focus_marker()
     render_mobile_message_focus()
