@@ -2717,7 +2717,7 @@ def render_admin_panel() -> None:
         )
         ttl = admin_duration_options[ttl_label]
         admin_room_password = st.text_input(
-            "Password pembuat room / key Fernet",
+            "Password pembuat room (min 8 karakter)",
             type="password",
             help="Password ini menurunkan Fernet key unik per room. Bagikan password secara terpisah dari invite link.",
             key="admin_creator_room_password",
@@ -2764,8 +2764,8 @@ def render_public_room_creator() -> None:
     st.markdown('<div class="terminal-card">', unsafe_allow_html=True)
     st.markdown('<div class="terminal-note">$ create_room --anonymous --random --temporary-link</div>', unsafe_allow_html=True)
     st.subheader("Buat room")
-    st.caption("Nama room dibuat otomatis dan acak. Password pembuat room juga menjadi dasar Fernet key unik room. Link hanya tampil 1 menit, tanpa revoke. Tombol Share WhatsApp ikut menyertakan password room.")
-    creator_password = st.text_input("Password pembuat room / key Fernet", type="password", help="Password ini dipakai untuk membuka enkripsi room, revoke room, dan hapus chat. Bagikan secara terpisah dari link.", key="public_creator_room_password")
+    st.caption("Nama room dibuat otomatis dan acak. Buat password untuk kunci ruangan. Share link yang dibuat dengan klik share via Whatsapp, dan hapus setelahnya")
+    creator_password = st.text_input("Password pembuat room (min 8 karakter)", type="password", help="Password ini dipakai untuk membuka enkripsi room, revoke room, dan hapus chat. Bagikan secara terpisah dari link.", key="public_creator_room_password")
     ttl = st.slider("Durasi room", min_value=1, max_value=ROOM_MAX_TTL_MINUTES, value=ROOM_DEFAULT_TTL_MINUTES, help="Maksimal 60 menit. Tampilan link hilang otomatis setelah 1 menit, tanpa revoke.", key="public_room_ttl")
     if st.button("Create random room + link", use_container_width=True):
         if len(str(creator_password or "").strip()) < 8:
