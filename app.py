@@ -2354,9 +2354,9 @@ def render_chat(messages: list[dict[str, Any]], username: str, room: str = "") -
         if msg_type == "text":
             content = html.escape(decrypt_room_text(room, str(msg.get("text", ""))))
         elif msg_type == "secret_note":
-            content = '<span class="secret">🔒 Secret Note</span><small>Buka lewat panel Fitur.</small>'
+            content = '<span class="secret">🔒 Secret Note</span><small>Buka lewat panel Fitur diatas.</small>'
         elif msg_type == "one_time":
-            content = '<span class="secret">👁️ One-Time Message</span><small>Buka sekali lewat panel Fitur, lalu pesan terhapus.</small>'
+            content = '<span class="secret">👁️ One-Time Message</span><small>Buka sekali lewat panel Fitur diatas, lalu pesan terhapus.</small>'
         elif msg_type == "poll":
             question = html.escape(decrypt_room_text(room, str(msg.get("question", ""))))
             votes = msg.get("votes") if isinstance(msg.get("votes"), dict) else {}
@@ -3303,7 +3303,7 @@ def render_online_users(entries: list[dict[str, Any]], current_username: str) ->
 
 def render_compact_room_panel(room: str, username: str, messages: list[dict[str, Any]]) -> None:
     with st.expander("Panel room", expanded=False):
-        tab_invite, tab_features, tab_files, tab_security = st.tabs(["Invite", "Fitur", "File", "Aksi"])
+        tab_invite, tab_features, tab_files, tab_security = st.tabs(["| Invite |", "| Fitur |", "| File |", "| Aksi |"])
         with tab_invite:
             render_room_invite_panel(room, username)
         with tab_features:
