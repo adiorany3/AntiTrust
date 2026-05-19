@@ -2690,7 +2690,7 @@ def render_admin_panel() -> None:
         )
         ttl = admin_duration_options[ttl_label]
         admin_room_password = st.text_input(
-            "Password pembuat room / key Fernet",
+            "Password pembuat room",
             type="password",
             help="Password ini menurunkan Fernet key unik per room. Bagikan password secara terpisah dari invite link.",
             key="admin_creator_room_password",
