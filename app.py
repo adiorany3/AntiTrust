@@ -2279,7 +2279,7 @@ def build_whatsapp_share_url(invite_url: str, room: str | None = None, password:
     text = (
         f"Masuk ke AntiTrust{room_label}: {invite_url}"
         f"{password_line}\n\n"
-        "Catatan: link, room, dan password bersifat sementara. Jangan teruskan ke orang yang tidak dipercaya."
+        "Catatan: link, room, dan password bersifat sementara, ketikkan password diatas. Jangan teruskan ke orang yang tidak dipercaya. Hapus pesan ini setelah berhasil masuk room"
     )
     return "https://wa.me/?" + urlencode({"text": text})
 
