@@ -3330,9 +3330,9 @@ def render_room_password_unlock(room: str) -> bool:
     st.markdown('<div class="terminal-card">', unsafe_allow_html=True)
     st.markdown('<div class="terminal-note">$ unlock_room_key --password-derived-fernet</div>', unsafe_allow_html=True)
     st.subheader("Unlock enkripsi room")
-    st.caption("Room ini memakai Fernet key unik yang diturunkan dari Password pembuat room. Masukkan password yang dibuat saat room dibuat.")
+    st.caption("Room ini memakai Fernet key unik yang diturunkan dari Password pembuat room. Masukkan password yang diberikan, jika gagal copy paste, silahkan ketikkan manual.")
     with st.form(f"room_crypto_unlock::{room_key(room)}"):
-        password = st.text_input("Password pembuat room", type="password")
+        password = st.text_input("Masukkan Password yang diberikan", type="password")
         submitted = st.form_submit_button("Unlock room", use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
     if not submitted:
