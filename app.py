@@ -652,6 +652,47 @@ html,body{
 @keyframes chat-grid{to{background-position:0 38px,38px 0,0 4px,0 0,0 0,0 0;}}
 .row{display:flex;margin:0 0 8px 0;}
 .row.me{justify-content:flex-end;}
+.row.system-row{justify-content:center;}
+.row.system-row .bubble{
+  max-width:92%;
+  text-align:center;
+  background:
+    linear-gradient(rgba(255,59,48,.055) 1px, transparent 1px),
+    linear-gradient(180deg,rgba(44,6,4,.94),rgba(10,0,0,.90));
+  background-size:100% 4px,auto;
+  border-color:rgba(255,59,48,.58);
+  border-left-color:var(--terminal-amber);
+  box-shadow:0 0 24px rgba(255,59,48,.18), inset 0 0 20px rgba(255,59,48,.055);
+  color:#ffd9d6;
+}
+.row.system-row .bubble::before{content:"! ";color:var(--terminal-amber);}
+.row.system-row .meta{justify-content:center;color:#ffc5c0;}
+.system-dot{
+  width:8px;
+  height:8px;
+  border-radius:999px;
+  display:inline-block;
+  background:var(--terminal-amber);
+  box-shadow:0 0 0 2px rgba(250,204,21,.18),0 0 12px rgba(250,204,21,.82);
+}
+.system-info{
+  display:block;
+  font-weight:900;
+  margin-bottom:5px;
+  color:var(--terminal-amber)!important;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+}
+.system-countdown-line{
+  display:inline-block;
+  margin-top:4px;
+  padding:4px 8px;
+  border-radius:8px;
+  background:rgba(255,59,48,.18);
+  border:1px solid rgba(255,59,48,.42);
+  font-weight:900;
+  color:#fff1ee;
+}
 .bubble{
   max-width:76%;
   padding:9px 11px;
@@ -2389,18 +2430,39 @@ def render_chat(messages: list[dict[str, Any]], username: str, room: str = "") -
         </script>
         """
     rows = ""
+    countdown_targets: list[dict[str, Any]] = []
     pinned = [m for m in messages if m.get("_pinned")]
     for msg in messages[-120:]:
         raw_sender = str(msg.get("username", "unknown"))
         sender = html.escape(raw_sender)
         sender_label = username_with_badge_html(raw_sender)
-        is_me = sender == html.escape(username)
+        msg_type = str(msg.get("type", "text"))
+        is_system = msg_type in {"system_countdown", "system_info"}
+        is_me = (sender == html.escape(username)) and not is_system
         hue = user_hue(raw_sender)
         bubble_style = f' style="--user-hue:{hue}"'
         time_label = html.escape(str(msg.get("time", "")))
-        msg_type = str(msg.get("type", "text"))
         if msg_type == "text":
             content = html.escape(decrypt_room_text(room, str(msg.get("text", ""))))
+        elif msg_type == "system_countdown":
+            seconds_left = max(0, int(msg.get("seconds_left", 0) or 0))
+            target_id = "system_countdown_" + hashlib.sha1(str(msg.get("id", secrets.token_hex(6))).encode("utf-8")).hexdigest()[:12]
+            countdown_targets.append({"id": target_id, "left": seconds_left})
+            if seconds_left > 0:
+                content = (
+                    '<span class="system-info">⚠️ Info System</span>'
+                    'Waktu room hampir habis dan akan segera berakhir.<br>'
+                    f'<span class="system-countdown-line">Waktu habis dalam <b id="{target_id}">{seconds_left} detik</b></span><br>'
+                    '<small>Hitungan mundur otomatis dari sistem.</small>'
+                )
+            else:
+                content = (
+                    '<span class="system-info">⛔ Info System</span>'
+                    '<span class="system-countdown-line">Waktu habis. Room akan otomatis direvoke.</span><br>'
+                    '<small>Sistem sedang menutup akses room.</small>'
+                )
+        elif msg_type == "system_info":
+            content = '<span class="system-info">ℹ️ Info System</span>' + html.escape(str(msg.get("text", "")))
         elif msg_type == "secret_note":
             content = '<span class="secret">🔒 Secret Note</span><small>Buka lewat panel Fitur diatas.</small>'
         elif msg_type == "one_time":
@@ -2437,13 +2499,16 @@ def render_chat(messages: list[dict[str, Any]], username: str, room: str = "") -
                 mime = html.escape(str(msg.get("thumbnail_mime", "image/jpeg")))
                 if thumb and not thumb.startswith("["):
                     content += f'<img class="thumb" src="data:{mime};base64,{html.escape(thumb, quote=True)}" />'
-        content += reaction_html(msg) + expire_html(msg)
+        if not is_system:
+            content += reaction_html(msg) + expire_html(msg)
         pin = ' 📌' if msg.get("_pinned") else ''
-        cls = "row me" if is_me else "row"
-        dot = '<span class="user-dot" aria-hidden="true"></span>'
+        cls = "row system-row" if is_system else ("row me" if is_me else "row")
+        dot = '<span class="system-dot" aria-hidden="true"></span>' if is_system else '<span class="user-dot" aria-hidden="true"></span>'
         me_label = '<span>kamu</span>' if is_me else ''
         pin_label = '<span>📌</span>' if pin else ''
         rows += f'<div class="{cls}"><div class="bubble"{bubble_style}>{content}<div class="meta">{dot}<span>{sender_label}</span>{me_label}{pin_label}<span>{time_label}</span></div></div></div>'
+
+    countdown_payload = json.dumps(countdown_targets, ensure_ascii=False)
     return CHAT_CSS + f"""
     <div id="antitrust-chat-box" class="chat">{rows}<div id="antitrust-chat-bottom"></div></div>
     <script>
@@ -2452,6 +2517,24 @@ def render_chat(messages: list[dict[str, Any]], username: str, room: str = "") -
         // Jangan panggil scrollIntoView karena itu menggeser halaman utama Streamlit.
         if (box) box.scrollTop = box.scrollHeight;
       }}
+      const systemCountdownTargets = {countdown_payload};
+      systemCountdownTargets.forEach(function(target) {{
+        let left = Math.max(0, parseInt(target.left || 0, 10));
+        const node = document.getElementById(target.id);
+        function tickSystemCountdown() {{
+          if (!node) return;
+          const line = node.closest('.system-countdown-line');
+          if (left > 0) {{
+            node.textContent = left + ' detik';
+          }} else {{
+            if (line) line.textContent = 'Waktu habis. Room akan otomatis direvoke.';
+            else node.textContent = 'waktu habis';
+          }}
+          if (left > 0) left -= 1;
+        }}
+        tickSystemCountdown();
+        setInterval(tickSystemCountdown, 1000);
+      }});
       requestAnimationFrame(scrollLatest);
       setTimeout(scrollLatest, 80);
       setTimeout(scrollLatest, 240);
@@ -3040,12 +3123,27 @@ def render_panic(room: str) -> None:
 
 
 def prepare_messages_for_render(room: str, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    pinned_id = get_room_config(room).get("pinned_message_id", "")
+    config = get_room_config(room)
+    pinned_id = config.get("pinned_message_id", "")
     prepared = []
     for msg in messages:
         copy_msg = dict(msg)
         copy_msg["_pinned"] = bool(pinned_id and str(copy_msg.get("id")) == pinned_id)
         prepared.append(copy_msg)
+
+    # Tambahkan pesan virtual dari sistem saat sisa waktu room tinggal 30 detik.
+    # Pesan ini tidak ditulis ke chat_rooms.json, jadi tidak menumpuk tiap detik.
+    left = room_seconds_left(room)
+    if 0 <= left <= 30:
+        prepared.append({
+            "id": f"system-room-countdown-{config.get('room_key', room_key(room))}-{config.get('expires_at', 0)}",
+            "type": "system_countdown",
+            "username": "System",
+            "time": now_wib_label(),
+            "seconds_left": int(left),
+            "created_at": now_epoch(),
+            "expires_at": int(config.get("expires_at", 0) or 0),
+        })
     return prepared
 
 
