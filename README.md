@@ -101,3 +101,5 @@ PY
 ## Perbaikan Admin Panel & Keterbacaan Form
 
 Versi ini memperbaiki tampilan Admin Panel agar tidak tertumpuk, terutama di layar HP. Area admin sekarang memakai layout vertikal, label yang bisa membungkus baris, tombol lebih tinggi, dan ringkasan room dalam bentuk chip agar teks panjang tidak saling menimpa. Dropdown, input, checkbox, dan expander juga diberi jarak serta kontras yang lebih tegas.
+
+- Perbaikan UI: teks ikon bawaan Streamlit disembunyikan dan diganti chevron CSS agar dropdown/expander tetap bersih.

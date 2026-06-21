@@ -916,6 +916,86 @@ ADMIN_PANEL_FIX_CSS = """
 </style>
 """
 
+
+KEYBOARD_ARROW_FIX_CSS = """
+<style>
+/* Fix ikon Streamlit/BaseWeb yang kadang tampil sebagai teks ligature.
+   Penyebab umum: global font-family menimpa font ikon Material. Kita sembunyikan
+   teks ligature dan tampilkan chevron CSS yang jelas serta konsisten. */
+span[class*="material-icons"],
+span[class*="material-symbols"],
+i[class*="material-icons"],
+i[class*="material-symbols"],
+[data-testid="stExpander"] summary span[class*="material"],
+[data-baseweb="select"] span[class*="material"],
+[data-baseweb="select"] i[class*="material"],
+button span[class*="material"],
+button i[class*="material"]{
+  font-size:0!important;
+  line-height:0!important;
+  color:transparent!important;
+  text-shadow:none!important;
+  overflow:hidden!important;
+  white-space:nowrap!important;
+  text-transform:none!important;
+  letter-spacing:0!important;
+  display:inline-flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  width:1.15rem!important;
+  min-width:1.15rem!important;
+  height:1.15rem!important;
+}
+span[class*="material-icons"]::after,
+span[class*="material-symbols"]::after,
+i[class*="material-icons"]::after,
+i[class*="material-symbols"]::after,
+[data-testid="stExpander"] summary span[class*="material"]::after,
+[data-baseweb="select"] span[class*="material"]::after,
+[data-baseweb="select"] i[class*="material"]::after,
+button span[class*="material"]::after,
+button i[class*="material"]::after{
+  content:"⌄"!important;
+  display:inline-flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  width:1.15rem!important;
+  height:1.15rem!important;
+  font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif!important;
+  font-size:1.05rem!important;
+  line-height:1!important;
+  font-weight:900!important;
+  color:#334155!important;
+}
+[data-testid="stExpander"] summary span[class*="material"]::after{
+  content:"›"!important;
+  transform:rotate(90deg);
+}
+[data-testid="stExpander"] details[open] summary span[class*="material"]::after{
+  transform:rotate(-90deg);
+}
+
+/* Beberapa versi Streamlit menyimpan ikon expander sebagai svg; pastikan tetap rapi. */
+[data-testid="stExpander"] summary svg,
+[data-baseweb="select"] svg{
+  color:#334155!important;
+  fill:#334155!important;
+  min-width:18px!important;
+  width:18px!important;
+  height:18px!important;
+  opacity:1!important;
+}
+
+/* Jaga dropdown tetap terbaca dan tidak tertutup icon/teks ligature. */
+div[data-baseweb="select"] > div{
+  overflow:hidden!important;
+}
+div[data-baseweb="select"] [aria-hidden="true"]{
+  flex-shrink:0!important;
+}
+</style>
+"""
+
 CHAT_CSS = """
 <style>
 :root{
@@ -3037,7 +3117,7 @@ def render_invite_expiry_redirect(seconds_left: int) -> None:
 def main() -> None:
     ensure_dirs()
     st.set_page_config(page_title=APP_TITLE, page_icon=APP_ICON, layout="centered")
-    st.markdown(CSS + FORM_READABILITY_CSS, unsafe_allow_html=True)
+    st.markdown(CSS + FORM_READABILITY_CSS + KEYBOARD_ARROW_FIX_CSS, unsafe_allow_html=True)
     destroyed = purge_inactive_rooms()
     auto_refresh, interval, sound = render_sidebar()
     if destroyed:
