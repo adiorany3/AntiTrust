@@ -919,81 +919,179 @@ ADMIN_PANEL_FIX_CSS = """
 
 KEYBOARD_ARROW_FIX_CSS = """
 <style>
-/* Fix ikon Streamlit/BaseWeb yang kadang tampil sebagai teks ligature.
-   Penyebab umum: global font-family menimpa font ikon Material. Kita sembunyikan
-   teks ligature dan tampilkan chevron CSS yang jelas serta konsisten. */
-span[class*="material-icons"],
-span[class*="material-symbols"],
-i[class*="material-icons"],
-i[class*="material-symbols"],
-[data-testid="stExpander"] summary span[class*="material"],
-[data-baseweb="select"] span[class*="material"],
-[data-baseweb="select"] i[class*="material"],
-button span[class*="material"],
-button i[class*="material"]{
-  font-size:0!important;
-  line-height:0!important;
-  color:transparent!important;
-  text-shadow:none!important;
-  overflow:hidden!important;
-  white-space:nowrap!important;
-  text-transform:none!important;
-  letter-spacing:0!important;
-  display:inline-flex!important;
-  align-items:center!important;
-  justify-content:center!important;
-  width:1.15rem!important;
-  min-width:1.15rem!important;
-  height:1.15rem!important;
-}
-span[class*="material-icons"]::after,
-span[class*="material-symbols"]::after,
-i[class*="material-icons"]::after,
-i[class*="material-symbols"]::after,
-[data-testid="stExpander"] summary span[class*="material"]::after,
-[data-baseweb="select"] span[class*="material"]::after,
-[data-baseweb="select"] i[class*="material"]::after,
-button span[class*="material"]::after,
-button i[class*="material"]::after{
-  content:"⌄"!important;
-  display:inline-flex!important;
-  align-items:center!important;
-  justify-content:center!important;
-  width:1.15rem!important;
-  height:1.15rem!important;
-  font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif!important;
-  font-size:1.05rem!important;
+/*
+  Perbaikan final untuk teks ikon Material yang muncul sebagai kata:
+  "keyboard_arrow..." / "keyboard_double_arrow...".
+
+  Penyebabnya biasanya CSS global yang menimpa font ikon Streamlit.
+  Solusi:
+  1) kembalikan font khusus ikon Material untuk elemen ikon asli Streamlit;
+  2) siapkan fallback visual yang tetap rapi bila font ikon gagal dimuat;
+  3) jaga selectbox/dropdown tetap punya ruang panah yang jelas.
+*/
+
+/* Jangan biarkan aturan font global menimpa ikon Material bawaan Streamlit. */
+[data-testid="stIconMaterial"],
+span[data-testid="stIconMaterial"],
+[class*="material-icons"],
+[class*="material-symbols"]{
+  font-family:"Material Symbols Rounded","Material Symbols Outlined","Material Icons",sans-serif!important;
+  font-feature-settings:"liga"!important;
+  -webkit-font-feature-settings:"liga"!important;
+  font-variation-settings:"FILL" 0,"wght" 500,"GRAD" 0,"opsz" 24!important;
+  font-size:20px!important;
   line-height:1!important;
-  font-weight:900!important;
   color:#334155!important;
-}
-[data-testid="stExpander"] summary span[class*="material"]::after{
-  content:"›"!important;
-  transform:rotate(90deg);
-}
-[data-testid="stExpander"] details[open] summary span[class*="material"]::after{
-  transform:rotate(-90deg);
+  text-shadow:none!important;
+  letter-spacing:normal!important;
+  text-transform:none!important;
+  white-space:nowrap!important;
+  overflow:hidden!important;
+  max-width:24px!important;
+  min-width:20px!important;
+  width:20px!important;
+  height:20px!important;
+  display:inline-flex!important;
+  align-items:center!important;
+  justify-content:center!important;
 }
 
-/* Beberapa versi Streamlit menyimpan ikon expander sebagai svg; pastikan tetap rapi. */
-[data-testid="stExpander"] summary svg,
-[data-baseweb="select"] svg{
-  color:#334155!important;
-  fill:#334155!important;
-  min-width:18px!important;
-  width:18px!important;
-  height:18px!important;
-  opacity:1!important;
+/* Hilangkan fallback lama yang bisa membuat panah dobel. */
+[data-testid="stIconMaterial"]::before,
+[data-testid="stIconMaterial"]::after,
+span[data-testid="stIconMaterial"]::before,
+span[data-testid="stIconMaterial"]::after,
+[class*="material-icons"]::before,
+[class*="material-icons"]::after,
+[class*="material-symbols"]::before,
+[class*="material-symbols"]::after{
+  content:none!important;
 }
 
-/* Jaga dropdown tetap terbaca dan tidak tertutup icon/teks ligature. */
+/* Selectbox/dropdown: area panah diberi ruang, namun teks pilihan tetap dominan. */
 div[data-baseweb="select"] > div{
+  min-height:48px!important;
+  border:2px solid #94a3b8!important;
+  border-radius:14px!important;
+  background:#ffffff!important;
+  color:#0f172a!important;
+  box-shadow:0 1px 2px rgba(15,23,42,.04)!important;
   overflow:hidden!important;
 }
-div[data-baseweb="select"] [aria-hidden="true"]{
+div[data-baseweb="select"] > div:focus-within{
+  border-color:#2563eb!important;
+  box-shadow:0 0 0 4px rgba(37,99,235,.14)!important;
+}
+div[data-baseweb="select"] [aria-hidden="true"],
+div[data-baseweb="select"] [data-testid="stIconMaterial"]{
+  flex-shrink:0!important;
+  margin-left:6px!important;
+}
+
+/* Expander: ikon bawaan cukup kecil dan tidak boleh mengambil ruang judul. */
+[data-testid="stExpander"] summary [data-testid="stIconMaterial"]{
+  margin-right:6px!important;
   flex-shrink:0!important;
 }
+
+/* Fallback bila ada renderer yang tetap menampilkan ligature sebagai teks biasa. */
+.kbd-arrow-fallback-plain{
+  font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif!important;
+  font-size:20px!important;
+  line-height:1!important;
+  color:#334155!important;
+  max-width:20px!important;
+  overflow:hidden!important;
+}
 </style>
+"""
+
+KEYBOARD_ARROW_CLEANUP_JS = """
+<script>
+(function(){
+  const MAP = {
+    keyboard_arrow_down: "⌄",
+    keyboard_arrow_up: "⌃",
+    keyboard_arrow_left: "‹",
+    keyboard_arrow_right: "›",
+    keyboard_double_arrow_down: "⌄",
+    keyboard_double_arrow_up: "⌃",
+    keyboard_double_arrow_left: "«",
+    keyboard_double_arrow_right: "»"
+  };
+  const RE = /keyboard_(?:double_)?arrow_(?:down|up|left|right)/g;
+
+  function replacement(text){
+    return String(text || "").replace(RE, function(match){ return MAP[match] || "⌄"; });
+  }
+
+  function cleanNode(root){
+    if(!root) return;
+
+    // Elemen ikon Streamlit/Material: jika ligature tampil sebagai teks, ubah menjadi simbol biasa.
+    const iconSelectors = [
+      '[data-testid="stIconMaterial"]',
+      'span[class*="material-icons"]',
+      'span[class*="material-symbols"]',
+      'i[class*="material-icons"]',
+      'i[class*="material-symbols"]'
+    ].join(',');
+    root.querySelectorAll && root.querySelectorAll(iconSelectors).forEach(function(el){
+      const txt = (el.textContent || '').trim();
+      if(RE.test(txt)){
+        RE.lastIndex = 0;
+        el.textContent = replacement(txt);
+        el.setAttribute('aria-hidden', 'true');
+        el.classList.add('kbd-arrow-fallback-plain');
+        el.style.fontSize = '20px';
+        el.style.color = '#334155';
+        el.style.maxWidth = '20px';
+      }
+    });
+
+    // Cadangan: jika ada text node terlanjur berisi keyboard_arrow..., bersihkan juga.
+    try{
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+      const nodes = [];
+      let n;
+      while((n = walker.nextNode())){
+        if(RE.test(n.nodeValue || '')){
+          RE.lastIndex = 0;
+          nodes.push(n);
+        }
+      }
+      nodes.forEach(function(n){ n.nodeValue = replacement(n.nodeValue); });
+    }catch(e){}
+  }
+
+  function run(){
+    try{
+      const doc = window.parent && window.parent.document ? window.parent.document : document;
+      cleanNode(doc.body);
+      if(!window.__antitrustKeyboardArrowObserver){
+        window.__antitrustKeyboardArrowObserver = new MutationObserver(function(mutations){
+          mutations.forEach(function(m){
+            if(m.target) cleanNode(m.target.nodeType === 1 ? m.target : doc.body);
+            (m.addedNodes || []).forEach(function(node){
+              if(node.nodeType === 1) cleanNode(node);
+              else if(node.nodeType === 3 && RE.test(node.nodeValue || '')){
+                RE.lastIndex = 0;
+                node.nodeValue = replacement(node.nodeValue);
+              }
+            });
+          });
+        });
+        window.__antitrustKeyboardArrowObserver.observe(doc.body, {childList:true, subtree:true, characterData:true});
+      }
+    }catch(e){}
+  }
+
+  run();
+  setTimeout(run, 80);
+  setTimeout(run, 400);
+  setTimeout(run, 1200);
+})();
+</script>
 """
 
 CHAT_CSS = """
@@ -3114,10 +3212,16 @@ def render_invite_expiry_redirect(seconds_left: int) -> None:
     )
 
 
+def inject_keyboard_arrow_cleanup() -> None:
+    """Remove visible Material-icon ligature text such as keyboard_arrow_down."""
+    components.html(KEYBOARD_ARROW_CLEANUP_JS, height=0)
+
+
 def main() -> None:
     ensure_dirs()
     st.set_page_config(page_title=APP_TITLE, page_icon=APP_ICON, layout="centered")
     st.markdown(CSS + FORM_READABILITY_CSS + KEYBOARD_ARROW_FIX_CSS, unsafe_allow_html=True)
+    inject_keyboard_arrow_cleanup()
     destroyed = purge_inactive_rooms()
     auto_refresh, interval, sound = render_sidebar()
     if destroyed:

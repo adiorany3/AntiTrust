@@ -164,3 +164,8 @@ PY
 Versi ini memperbaiki tampilan Admin Panel agar tidak tertumpuk, terutama di layar HP. Area admin sekarang memakai layout vertikal, label yang bisa membungkus baris, tombol lebih tinggi, dan ringkasan room dalam bentuk chip agar teks panjang tidak saling menimpa. Dropdown, input, checkbox, dan expander juga diberi jarak serta kontras yang lebih tegas.
 
 - Perbaikan UI: teks ikon bawaan Streamlit disembunyikan dan diganti chevron CSS agar dropdown/expander tetap bersih.
+
+### Perbaikan final ikon dropdown/expander
+
+Teks ikon Material seperti `keyboard_arrow` dan `keyboard_double_arrow` sudah ditangani dengan CSS khusus dan fallback JavaScript. Dropdown/selectbox serta expander menampilkan simbol panah biasa yang ringkas, bukan teks ligature.
+
