@@ -143,3 +143,11 @@ PY
 - Area chat dibuat lebih dekat dengan tombol/input kirim.
 - Fokus auto-refresh di HP diarahkan ke area pesan dan form kirim agar tidak perlu sering scroll naik-turun.
 - Chat tetap auto-scroll ke pesan terbaru di dalam panel, bukan menggulung halaman utama.
+
+
+## Update desain bersih
+
+- Tampilan hacker/terminal sudah dihilangkan dan diganti menjadi desain profesional yang lebih terang, rapi, dan mudah dibaca.
+- Dropdown/selectbox diperkuat dengan latar putih, teks gelap, kontras tinggi, dan area pilihan yang lebih besar agar nyaman di desktop maupun HP.
+- Chat bubble, kartu status, tombol, tab, dan sidebar dibuat lebih sederhana sehingga pengguna baru lebih mudah memahami alur aplikasi.
+- Layout tetap responsif: tab dapat digeser di layar kecil, tombol tetap besar, dan input memakai ukuran font aman untuk browser mobile.

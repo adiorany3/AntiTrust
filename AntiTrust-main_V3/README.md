@@ -7,3 +7,11 @@ Perubahan terbaru:
 - Password pembuat room tetap wajib untuk user biasa.
 - Admin tetap tidak perlu password pembuat room.
 - Fitur sebelumnya tetap ada: link auto-copy, link hilang setelah 1 menit tanpa revoke, admin list room/link aktif, durasi admin panjang, revoke room satu-satu/semua.
+
+
+## Update desain bersih
+
+- Tampilan hacker/terminal sudah dihilangkan dan diganti menjadi desain profesional yang lebih terang, rapi, dan mudah dibaca.
+- Dropdown/selectbox diperkuat dengan latar putih, teks gelap, kontras tinggi, dan area pilihan yang lebih besar agar nyaman di desktop maupun HP.
+- Chat bubble, kartu status, tombol, tab, dan sidebar dibuat lebih sederhana sehingga pengguna baru lebih mudah memahami alur aplikasi.
+- Layout tetap responsif: tab dapat digeser di layar kecil, tombol tetap besar, dan input memakai ukuran font aman untuk browser mobile.

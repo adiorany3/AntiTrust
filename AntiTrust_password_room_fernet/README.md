@@ -26,7 +26,7 @@ AntiTrust adalah private temporary chat berbasis Streamlit. Paket ini sudah dipe
 - **Landing page lebih jelas**: pengguna melihat alur 3 langkah: buat room, bagikan undangan, lalu jalankan sesi.
 - **Pusat kontrol room terbuka otomatis**: invite, Google Meet, peserta, fitur, file, dan keamanan berada di satu area yang mudah ditemukan.
 - **Dashboard status room**: sisa waktu, status lock, jumlah peserta, dan status Google Meet tampil sebagai kartu ringkas.
-- **Chat bubble lebih modern**: pesan lebih mudah dibaca, bubble lebih rapi, dan gaya terminal lama diringankan agar nyaman untuk sesi panjang.
+- **Chat bubble lebih modern**: pesan lebih mudah dibaca, bubble lebih rapi, dan gaya terminal/hacker dihilangkan agar nyaman untuk sesi panjang.
 - **Label Bahasa Indonesia lebih natural**: tombol dan tab diganti menjadi teks yang mudah dipahami pengguna non-teknis.
 
 ## Cara menjalankan
@@ -82,3 +82,11 @@ PY
 > Waktu sesi mengikuti countdown di room/chat.  
 > Jika ada video call, tombol Google Meet tersedia di Pusat kontrol room → Video setelah masuk.  
 > Jangan teruskan link/password ke orang lain dan hapus pesan ini setelah berhasil masuk.
+
+
+## Update desain bersih
+
+- Tampilan hacker/terminal sudah dihilangkan dan diganti menjadi desain profesional yang lebih terang, rapi, dan mudah dibaca.
+- Dropdown/selectbox diperkuat dengan latar putih, teks gelap, kontras tinggi, dan area pilihan yang lebih besar agar nyaman di desktop maupun HP.
+- Chat bubble, kartu status, tombol, tab, dan sidebar dibuat lebih sederhana sehingga pengguna baru lebih mudah memahami alur aplikasi.
+- Layout tetap responsif: tab dapat digeser di layar kecil, tombol tetap besar, dan input memakai ukuran font aman untuk browser mobile.
