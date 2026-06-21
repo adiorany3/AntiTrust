@@ -14,7 +14,7 @@ import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -69,6 +69,8 @@ ROOM_MAX_TTL_MINUTES = 60
 ADMIN_ROOM_MAX_TTL_MINUTES = 10080  # 7 hari, khusus admin
 ADMIN_ROOM_DEFAULT_TTL_MINUTES = 1440  # 24 jam
 RESERVED_DISPLAY_NAMES = {"adioranye", "galuh adi insani"}
+VIDEO_CALL_PROVIDER = "Google Meet"
+DEFAULT_VIDEO_SESSION_NOTE = "Sesi video call mengikuti waktu chat/room aktif. Gunakan countdown room sebagai patokan."
 
 ALLOWED_IMAGE_TYPES = {"png", "jpg", "jpeg", "webp"}
 ALLOWED_AUDIO_TYPES = {"wav", "mp3", "ogg", "m4a", "aac", "flac", "webm"}
@@ -1378,6 +1380,9 @@ def get_room_config(room: str) -> dict[str, Any]:
         "creator_password_hash": str(config.get("creator_password_hash", "") or ""),
         "room_fernet_salt": str(config.get("room_fernet_salt", "") or ""),
         "room_crypto_version": int(config.get("room_crypto_version", 1 if not config.get("room_fernet_salt") else ROOM_CRYPTO_VERSION)),
+        "video_call_provider": str(config.get("video_call_provider", VIDEO_CALL_PROVIDER) or VIDEO_CALL_PROVIDER),
+        "video_call_url_cipher": str(config.get("video_call_url_cipher", "") or ""),
+        "video_session_note_cipher": str(config.get("video_session_note_cipher", "") or ""),
     }
 
 
@@ -1490,6 +1495,9 @@ def ensure_room_config(
         "creator_password_hash": creator_password_digest(room, creator_password) if str(creator_password or "").strip() else "",
         "room_fernet_salt": _b64encode(secrets.token_bytes(ROOM_SALT_BYTES)) if str(creator_password or "").strip() else "",
         "room_crypto_version": ROOM_CRYPTO_VERSION if str(creator_password or "").strip() else 1,
+        "video_call_provider": VIDEO_CALL_PROVIDER,
+        "video_call_url_cipher": "",
+        "video_session_note_cipher": encrypt_text(DEFAULT_VIDEO_SESSION_NOTE),
     }
     if str(creator_password or "").strip() and config.get("room_fernet_salt"):
         st.session_state[room_crypto_session_key(room)] = derive_room_fernet_key(room, creator_password, str(config.get("room_fernet_salt", ""))).decode("ascii")
@@ -1497,6 +1505,49 @@ def ensure_room_config(
     settings[key] = config
     atomic_write_json(ROOM_SETTINGS_FILE, settings)
     return config
+
+
+def sanitize_gmeet_url(raw_url: str) -> str:
+    """Return a normalized Google Meet URL or an empty string when invalid."""
+    value = str(raw_url or "").strip()
+    if not value:
+        return ""
+    if value.startswith("meet.google.com/"):
+        value = "https://" + value
+    parsed = urlparse(value)
+    host = parsed.netloc.lower()
+    if parsed.scheme not in {"http", "https"} or host != "meet.google.com" or not parsed.path.strip("/"):
+        return ""
+    return value[:500]
+
+
+def decrypt_optional_config_text(cipher_text: str, fallback: str = "") -> str:
+    if not cipher_text:
+        return fallback
+    value = decrypt_text(cipher_text)
+    if value.startswith("[") and "tidak dapat didekripsi" in value:
+        return fallback
+    return value
+
+
+def get_room_video_call(room: str) -> dict[str, str]:
+    config = get_room_config(room)
+    note = decrypt_optional_config_text(str(config.get("video_session_note_cipher", "") or ""), DEFAULT_VIDEO_SESSION_NOTE)
+    return {
+        "provider": str(config.get("video_call_provider", VIDEO_CALL_PROVIDER) or VIDEO_CALL_PROVIDER),
+        "url": decrypt_optional_config_text(str(config.get("video_call_url_cipher", "") or ""), ""),
+        "session_note": note or DEFAULT_VIDEO_SESSION_NOTE,
+    }
+
+
+def save_room_video_call(room: str, url: str, session_note: str) -> None:
+    config = get_room_config(room)
+    clean_url = sanitize_gmeet_url(url)
+    clean_note = str(session_note or DEFAULT_VIDEO_SESSION_NOTE).strip()[:240] or DEFAULT_VIDEO_SESSION_NOTE
+    config["video_call_provider"] = VIDEO_CALL_PROVIDER
+    config["video_call_url_cipher"] = encrypt_text(clean_url) if clean_url else ""
+    config["video_session_note_cipher"] = encrypt_text(clean_note)
+    save_room_config(room, config)
 
 
 def room_seconds_left(room: str) -> int:
@@ -3056,6 +3107,55 @@ def clear_destroy_countdown() -> None:
         st.session_state.pop(key, None)
 
 
+def render_video_call_panel(room: str, username: str) -> None:
+    data = get_room_video_call(room)
+    current_url = data.get("url", "")
+    current_note = data.get("session_note", DEFAULT_VIDEO_SESSION_NOTE)
+
+    st.markdown("**Google Meet**")
+    st.caption("Koneksi video call bisa menggunakan Google Meet. Sesi mengikuti waktu chat/room aktif, jadi patokannya adalah countdown room.")
+
+    if current_url:
+        st.success("Link Google Meet aktif untuk room ini.")
+        st.link_button("Buka Google Meet", current_url, use_container_width=True)
+        st.caption(current_note)
+    else:
+        st.info("Belum ada link Google Meet. Pembuat room bisa menambahkan link agar peserta langsung join dari panel ini.")
+
+    if not render_room_creator_unlock(room, "video_call_panel"):
+        return
+
+    with st.form(f"video_call_form::{room_key(room)}"):
+        meet_url = st.text_input("Link Google Meet", value=current_url, placeholder="https://meet.google.com/abc-defg-hij")
+        note = st.text_area("Catatan sesi", value=current_note, max_chars=240, height=76)
+        save_clicked = st.form_submit_button("Simpan info video call", use_container_width=True)
+    if save_clicked:
+        clean_url = sanitize_gmeet_url(meet_url)
+        if meet_url.strip() and not clean_url:
+            st.warning("Masukkan link Google Meet yang valid, contoh: https://meet.google.com/abc-defg-hij")
+            return
+        save_room_video_call(room, clean_url, note)
+        st.success("Info Google Meet disimpan.")
+        st.rerun()
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Kirim info ke chat", use_container_width=True, disabled=not bool(current_url), key=f"post_meet_info::{room_key(room)}"):
+            text = (
+                "Untuk koneksi video call bisa menggunakan Google Meet. "
+                "Sesi mengikuti waktu chat/room aktif. "
+                f"Link: {current_url}"
+            )
+            if not rate_limited("video_call_info"):
+                append_text(room, username, text, 0)
+                st.rerun()
+    with col2:
+        if st.button("Hapus link GMeet", use_container_width=True, disabled=not bool(current_url), key=f"clear_meet_info::{room_key(room)}"):
+            save_room_video_call(room, "", DEFAULT_VIDEO_SESSION_NOTE)
+            st.success("Link Google Meet dihapus dari room.")
+            st.rerun()
+
+
 def render_room_actions(room: str, username: str) -> None:
     with st.expander("Aksi", expanded=False):
         st.caption("Keluar room dinonaktifkan agar identitas tidak bisa direset.")
@@ -3449,9 +3549,11 @@ def render_online_users(entries: list[dict[str, Any]], current_username: str) ->
 
 def render_compact_room_panel(room: str, username: str, messages: list[dict[str, Any]]) -> None:
     with st.expander("Panel room", expanded=False):
-        tab_invite, tab_features, tab_files, tab_security = st.tabs(["| Invite |", "| Fitur |", "| File |", "| Aksi |"])
+        tab_invite, tab_video, tab_features, tab_files, tab_security = st.tabs(["| Invite |", "| Video Call |", "| Fitur |", "| File |", "| Aksi |"])
         with tab_invite:
             render_room_invite_panel(room, username)
+        with tab_video:
+            render_video_call_panel(room, username)
         with tab_features:
             render_feature_panel(room, username, messages)
         with tab_files:
@@ -3587,6 +3689,12 @@ def main() -> None:
         unsafe_allow_html=True,
     )
     render_online_users(online_entries, username)
+    video_call = get_room_video_call(room)
+    if video_call.get("url"):
+        with st.container(border=True):
+            st.markdown("**Video call:** Google Meet")
+            st.caption(video_call.get("session_note", DEFAULT_VIDEO_SESSION_NOTE))
+            st.link_button("Join Google Meet", video_call["url"], use_container_width=True)
     render_sound_notice(latest_foreign_signature(messages, username), sound)
     render_pinned_message(room, messages)
     render_compact_room_panel(room, username, messages)

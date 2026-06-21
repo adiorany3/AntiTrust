@@ -14,7 +14,7 @@ import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -69,6 +69,8 @@ ROOM_MAX_TTL_MINUTES = 60
 ADMIN_ROOM_MAX_TTL_MINUTES = 10080  # 7 hari, khusus admin
 ADMIN_ROOM_DEFAULT_TTL_MINUTES = 1440  # 24 jam
 RESERVED_DISPLAY_NAMES = {"adioranye", "galuh adi insani"}
+VIDEO_CALL_PROVIDER = "Google Meet"
+DEFAULT_VIDEO_SESSION_NOTE = "Sesi video call mengikuti waktu chat/room aktif. Gunakan countdown room sebagai patokan."
 
 ALLOWED_IMAGE_TYPES = {"png", "jpg", "jpeg", "webp"}
 ALLOWED_AUDIO_TYPES = {"wav", "mp3", "ogg", "m4a", "aac", "flac", "webm"}
@@ -652,6 +654,47 @@ html,body{
 @keyframes chat-grid{to{background-position:0 38px,38px 0,0 4px,0 0,0 0,0 0;}}
 .row{display:flex;margin:0 0 8px 0;}
 .row.me{justify-content:flex-end;}
+.row.system-row{justify-content:center;}
+.row.system-row .bubble{
+  max-width:92%;
+  text-align:center;
+  background:
+    linear-gradient(rgba(255,59,48,.055) 1px, transparent 1px),
+    linear-gradient(180deg,rgba(44,6,4,.94),rgba(10,0,0,.90));
+  background-size:100% 4px,auto;
+  border-color:rgba(255,59,48,.58);
+  border-left-color:var(--terminal-amber);
+  box-shadow:0 0 24px rgba(255,59,48,.18), inset 0 0 20px rgba(255,59,48,.055);
+  color:#ffd9d6;
+}
+.row.system-row .bubble::before{content:"! ";color:var(--terminal-amber);}
+.row.system-row .meta{justify-content:center;color:#ffc5c0;}
+.system-dot{
+  width:8px;
+  height:8px;
+  border-radius:999px;
+  display:inline-block;
+  background:var(--terminal-amber);
+  box-shadow:0 0 0 2px rgba(250,204,21,.18),0 0 12px rgba(250,204,21,.82);
+}
+.system-info{
+  display:block;
+  font-weight:900;
+  margin-bottom:5px;
+  color:var(--terminal-amber)!important;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+}
+.system-countdown-line{
+  display:inline-block;
+  margin-top:4px;
+  padding:4px 8px;
+  border-radius:8px;
+  background:rgba(255,59,48,.18);
+  border:1px solid rgba(255,59,48,.42);
+  font-weight:900;
+  color:#fff1ee;
+}
 .bubble{
   max-width:76%;
   padding:9px 11px;
@@ -884,6 +927,15 @@ def room_crypto_session_key(room: str) -> str:
     return "room_fernet_key::" + room_key(room)
 
 
+def room_share_password_session_key(room: str) -> str:
+    """Simpan password plaintext hanya di session browser agar bisa ikut dibagikan via WhatsApp.
+
+    Password asli tidak pernah disimpan ke file JSON/server storage. Key ini hanya hidup
+    selama sesi Streamlit user yang membuat atau berhasil unlock room.
+    """
+    return "room_share_password::" + room_key(room)
+
+
 def room_crypto_salt(room: str) -> str:
     config = get_room_config(room)
     return str(config.get("room_fernet_salt", "") or "")
@@ -919,8 +971,9 @@ def remember_room_password(room: str, password: str) -> bool:
     salt = room_crypto_salt(room)
     if salt:
         st.session_state[room_crypto_session_key(room)] = derive_room_fernet_key(room, clean_password, salt).decode("ascii")
-    # Password yang benar juga membuka aksi pembuat room.
+    # Password yang benar juga membuka aksi pembuat room dan bisa dipakai untuk share WhatsApp.
     st.session_state[room_creator_session_key(room)] = True
+    st.session_state[room_share_password_session_key(room)] = clean_password
     return True
 
 
@@ -1327,6 +1380,9 @@ def get_room_config(room: str) -> dict[str, Any]:
         "creator_password_hash": str(config.get("creator_password_hash", "") or ""),
         "room_fernet_salt": str(config.get("room_fernet_salt", "") or ""),
         "room_crypto_version": int(config.get("room_crypto_version", 1 if not config.get("room_fernet_salt") else ROOM_CRYPTO_VERSION)),
+        "video_call_provider": str(config.get("video_call_provider", VIDEO_CALL_PROVIDER) or VIDEO_CALL_PROVIDER),
+        "video_call_url_cipher": str(config.get("video_call_url_cipher", "") or ""),
+        "video_session_note_cipher": str(config.get("video_session_note_cipher", "") or ""),
     }
 
 
@@ -1358,6 +1414,7 @@ def set_room_creator_password(room: str, password: str) -> None:
         config["room_crypto_version"] = ROOM_CRYPTO_VERSION
     save_room_config(room, config)
     st.session_state[room_crypto_session_key(room)] = derive_room_fernet_key(room, clean_password, str(config.get("room_fernet_salt", ""))).decode("ascii")
+    st.session_state[room_share_password_session_key(room)] = clean_password
 
 
 def verify_room_creator_password(room: str, password: str) -> bool:
@@ -1421,6 +1478,7 @@ def ensure_room_config(
             config["room_crypto_version"] = ROOM_CRYPTO_VERSION
         if str(creator_password or "").strip() and config.get("room_fernet_salt"):
             st.session_state[room_crypto_session_key(room)] = derive_room_fernet_key(room, creator_password, str(config.get("room_fernet_salt", ""))).decode("ascii")
+            st.session_state[room_share_password_session_key(room)] = str(creator_password or "")
         settings[key] = config
         atomic_write_json(ROOM_SETTINGS_FILE, settings)
         return config
@@ -1437,12 +1495,59 @@ def ensure_room_config(
         "creator_password_hash": creator_password_digest(room, creator_password) if str(creator_password or "").strip() else "",
         "room_fernet_salt": _b64encode(secrets.token_bytes(ROOM_SALT_BYTES)) if str(creator_password or "").strip() else "",
         "room_crypto_version": ROOM_CRYPTO_VERSION if str(creator_password or "").strip() else 1,
+        "video_call_provider": VIDEO_CALL_PROVIDER,
+        "video_call_url_cipher": "",
+        "video_session_note_cipher": encrypt_text(DEFAULT_VIDEO_SESSION_NOTE),
     }
     if str(creator_password or "").strip() and config.get("room_fernet_salt"):
         st.session_state[room_crypto_session_key(room)] = derive_room_fernet_key(room, creator_password, str(config.get("room_fernet_salt", ""))).decode("ascii")
+        st.session_state[room_share_password_session_key(room)] = str(creator_password or "")
     settings[key] = config
     atomic_write_json(ROOM_SETTINGS_FILE, settings)
     return config
+
+
+def sanitize_gmeet_url(raw_url: str) -> str:
+    """Return a normalized Google Meet URL or an empty string when invalid."""
+    value = str(raw_url or "").strip()
+    if not value:
+        return ""
+    if value.startswith("meet.google.com/"):
+        value = "https://" + value
+    parsed = urlparse(value)
+    host = parsed.netloc.lower()
+    if parsed.scheme not in {"http", "https"} or host != "meet.google.com" or not parsed.path.strip("/"):
+        return ""
+    return value[:500]
+
+
+def decrypt_optional_config_text(cipher_text: str, fallback: str = "") -> str:
+    if not cipher_text:
+        return fallback
+    value = decrypt_text(cipher_text)
+    if value.startswith("[") and "tidak dapat didekripsi" in value:
+        return fallback
+    return value
+
+
+def get_room_video_call(room: str) -> dict[str, str]:
+    config = get_room_config(room)
+    note = decrypt_optional_config_text(str(config.get("video_session_note_cipher", "") or ""), DEFAULT_VIDEO_SESSION_NOTE)
+    return {
+        "provider": str(config.get("video_call_provider", VIDEO_CALL_PROVIDER) or VIDEO_CALL_PROVIDER),
+        "url": decrypt_optional_config_text(str(config.get("video_call_url_cipher", "") or ""), ""),
+        "session_note": note or DEFAULT_VIDEO_SESSION_NOTE,
+    }
+
+
+def save_room_video_call(room: str, url: str, session_note: str) -> None:
+    config = get_room_config(room)
+    clean_url = sanitize_gmeet_url(url)
+    clean_note = str(session_note or DEFAULT_VIDEO_SESSION_NOTE).strip()[:240] or DEFAULT_VIDEO_SESSION_NOTE
+    config["video_call_provider"] = VIDEO_CALL_PROVIDER
+    config["video_call_url_cipher"] = encrypt_text(clean_url) if clean_url else ""
+    config["video_session_note_cipher"] = encrypt_text(clean_note)
+    save_room_config(room, config)
 
 
 def room_seconds_left(room: str) -> int:
@@ -2071,6 +2176,7 @@ def render_temporary_invite_link(
     display_until_key: str,
     input_key: str,
     label: str = "Link hilang dari halaman dalam",
+    password_key: str | None = None,
 ) -> bool:
     """Show invite link for 1 minute only in the UI; do not revoke token or room."""
     invite_url = st.session_state.get(url_key)
@@ -2088,6 +2194,8 @@ def render_temporary_invite_link(
         keys = [url_key, token_key, display_until_key]
         if room_key:
             keys.append(room_key)
+        if password_key:
+            keys.append(password_key)
         clear_invite_display(*keys)
         try:
             st.query_params.clear()
@@ -2101,13 +2209,16 @@ def render_temporary_invite_link(
         keys = [url_key, token_key, display_until_key]
         if room_key:
             keys.append(room_key)
+        if password_key:
+            keys.append(password_key)
         clear_invite_display(*keys)
         st.toast("Invite link sudah habis sesuai durasi aslinya.")
         st.rerun()
 
     room_name = st.session_state.get(room_key) if room_key else None
+    share_password = st.session_state.get(password_key) if password_key else None
     render_click_to_copy_invite_link(invite_url, input_key)
-    render_whatsapp_share(invite_url, room_name)
+    render_whatsapp_share(invite_url, room_name, share_password)
     with st.expander("QR Invite", expanded=False):
         render_qr_invite(invite_url)
     render_countdown(label, display_left)
@@ -2119,8 +2230,8 @@ def force_landing_on_expired_invite() -> None:
     """Clear invite query/state and return to the landing page."""
     clear_invite_display(
         "room_invite_url", "room_invite_token",
-        "public_invite_url", "public_invite_token", "public_room", "public_invite_display_until",
-        "last_invite", "last_invite_token", "last_room", "last_invite_display_until",
+        "public_invite_url", "public_invite_token", "public_room", "public_invite_display_until", "public_room_share_password",
+        "last_invite", "last_invite_token", "last_room", "last_invite_display_until", "last_room_share_password",
     )
     try:
         st.query_params.clear()
@@ -2136,6 +2247,8 @@ def render_expiring_invite_link(
     room_key: str | None = None,
     input_key: str,
     label: str = "Sisa waktu link",
+    password: str | None = None,
+    password_key: str | None = None,
 ) -> bool:
     """Render invite link only while it is active. Returns True when visible."""
     invite_url = st.session_state.get(url_key)
@@ -2147,12 +2260,15 @@ def render_expiring_invite_link(
         keys = [url_key, token_key]
         if room_key:
             keys.append(room_key)
+        if password_key:
+            keys.append(password_key)
         clear_invite_display(*keys)
         st.toast("Invite link sudah habis dan disembunyikan.")
         st.rerun()
     room_name = st.session_state.get(room_key) if room_key else None
+    share_password = password if password is not None else (st.session_state.get(password_key) if password_key else None)
     render_click_to_copy_invite_link(invite_url, input_key)
-    render_whatsapp_share(invite_url, room_name)
+    render_whatsapp_share(invite_url, room_name, share_password)
     with st.expander("QR Invite", expanded=False):
         render_qr_invite(invite_url)
     render_countdown(label, left)
@@ -2182,39 +2298,87 @@ def format_room_time_left(seconds: int) -> str:
 def render_countdown(label: str, seconds_left: int) -> None:
     safe_label = html.escape(label)
     safe_id = "countdown_" + hashlib.sha1(f"{label}:{seconds_left}:{time.time_ns()}".encode()).hexdigest()[:12]
+    warning_id = safe_id + "_warning"
+
     components.html(
         f"""
-        <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;border:1px solid rgba(255,255,255,.22);border-radius:15px;padding:5px 8px;background:rgba(255,255,255,.10);backdrop-filter:blur(18px);color:inherit">
-          <div style="font-size:10px;opacity:.72;margin-bottom:0">{safe_label}</div>
-          <div id="{safe_id}" style="font-size:16px;font-weight:800;letter-spacing:-.04em">{format_room_time_left(seconds_left)}</div>
+        <div style="
+          font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+          border:1px solid rgba(255,255,255,.22);
+          border-radius:15px;
+          padding:7px 9px;
+          background:rgba(255,255,255,.10);
+          backdrop-filter:blur(18px);
+          color:inherit;
+        ">
+          <div style="font-size:10px;opacity:.72;margin-bottom:2px">{safe_label}</div>
+
+          <div id="{safe_id}" style="
+            font-size:16px;
+            font-weight:800;
+            letter-spacing:-.04em;
+          ">{format_room_time_left(seconds_left)}</div>
+
+          <div id="{warning_id}" style="
+            display:none;
+            margin-top:6px;
+            padding:6px 8px;
+            border-radius:10px;
+            background:rgba(255,59,48,.18);
+            border:1px solid rgba(255,59,48,.55);
+            color:#ffd9d6;
+            font-size:12px;
+            font-weight:800;
+          "></div>
         </div>
+
         <script>
           let left = {max(0, int(seconds_left))};
           const el = document.getElementById('{safe_id}');
+          const warning = document.getElementById('{warning_id}');
+
           function fmt(total) {{
             total = Math.max(0, total);
             const d = Math.floor(total / 86400);
             const h = Math.floor((total % 86400) / 3600);
             const m = Math.floor((total % 3600) / 60);
             const s = total % 60;
+
             const hh = h.toString().padStart(2, '0');
             const mm = m.toString().padStart(2, '0');
             const ss = s.toString().padStart(2, '0');
+
             if (d > 0) return `${{d}} hari ${{hh}}:${{mm}}:${{ss}}`;
             if (h > 0) return `${{hh}}:${{mm}}:${{ss}}`;
             return `${{mm}}:${{ss}}`;
           }}
+
           function tick() {{
             if (!el) return;
+
             el.textContent = fmt(left);
+
+            if (warning) {{
+              if (left > 0 && left <= 30) {{
+                warning.style.display = 'block';
+                warning.textContent = `⚠️ Waktu hampir habis. Room akan berakhir dalam ${{left}} detik.`;
+              }} else if (left <= 0) {{
+                warning.style.display = 'block';
+                warning.textContent = '⛔ Waktu habis. Room akan otomatis direvoke.';
+              }} else {{
+                warning.style.display = 'none';
+              }}
+            }}
+
             if (left > 0) left -= 1;
           }}
-          tick(); setInterval(tick, 1000);
+
+          tick();
+          setInterval(tick, 1000);
         </script>
         """,
-        height=43,
+        height=76,
     )
-
 
 def resolve_invite(token: str | None) -> str | None:
     if not token:
@@ -2248,19 +2412,22 @@ def build_invite_url(token: str) -> str:
     return f"{public_base_url()}?{urlencode({'invite': token})}"
 
 
-def build_whatsapp_share_url(invite_url: str, room: str | None = None) -> str:
+def build_whatsapp_share_url(invite_url: str, room: str | None = None, password: str | None = None) -> str:
     room_label = f" untuk room {room}" if room else ""
+    password = str(password or "").strip()
+    password_line = f"\nPassword room: {password}" if password else "\nPassword room: minta ke pembuat room."
     text = (
-        f"Masuk ke AntiTrust{room_label}: {invite_url}\n\n"
-        "Catatan: link dan room bersifat sementara, maksimal aktif 60 menit."
+        f"Masuk ke AntiTrust{room_label}: {invite_url}"
+        f"{password_line}\n\n"
+        "Catatan: link, room, dan password bersifat sementara, ketikkan password diatas. Jangan teruskan ke orang yang tidak dipercaya. Hapus pesan ini setelah berhasil masuk room"
     )
     return "https://wa.me/?" + urlencode({"text": text})
 
 
-def render_whatsapp_share(invite_url: str, room: str | None = None) -> None:
+def render_whatsapp_share(invite_url: str, room: str | None = None, password: str | None = None) -> None:
     if not invite_url:
         return
-    st.link_button("Share WhatsApp", build_whatsapp_share_url(invite_url, room), use_container_width=True)
+    st.link_button("Share WhatsApp", build_whatsapp_share_url(invite_url, room, password), use_container_width=True)
 
 
 def make_qr_png(data: str) -> bytes | None:
@@ -2314,22 +2481,43 @@ def render_chat(messages: list[dict[str, Any]], username: str, room: str = "") -
         </script>
         """
     rows = ""
+    countdown_targets: list[dict[str, Any]] = []
     pinned = [m for m in messages if m.get("_pinned")]
     for msg in messages[-120:]:
         raw_sender = str(msg.get("username", "unknown"))
         sender = html.escape(raw_sender)
         sender_label = username_with_badge_html(raw_sender)
-        is_me = sender == html.escape(username)
+        msg_type = str(msg.get("type", "text"))
+        is_system = msg_type in {"system_countdown", "system_info"}
+        is_me = (sender == html.escape(username)) and not is_system
         hue = user_hue(raw_sender)
         bubble_style = f' style="--user-hue:{hue}"'
         time_label = html.escape(str(msg.get("time", "")))
-        msg_type = str(msg.get("type", "text"))
         if msg_type == "text":
             content = html.escape(decrypt_room_text(room, str(msg.get("text", ""))))
+        elif msg_type == "system_countdown":
+            seconds_left = max(0, int(msg.get("seconds_left", 0) or 0))
+            target_id = "system_countdown_" + hashlib.sha1(str(msg.get("id", secrets.token_hex(6))).encode("utf-8")).hexdigest()[:12]
+            countdown_targets.append({"id": target_id, "left": seconds_left})
+            if seconds_left > 0:
+                content = (
+                    '<span class="system-info">⚠️ Info System</span>'
+                    'Waktu room hampir habis dan akan segera berakhir.<br>'
+                    f'<span class="system-countdown-line">Waktu habis dalam <b id="{target_id}">{seconds_left} detik</b></span><br>'
+                    '<small>Hitungan mundur otomatis dari sistem.</small>'
+                )
+            else:
+                content = (
+                    '<span class="system-info">⛔ Info System</span>'
+                    '<span class="system-countdown-line">Waktu habis. Room akan otomatis direvoke.</span><br>'
+                    '<small>Sistem sedang menutup akses room.</small>'
+                )
+        elif msg_type == "system_info":
+            content = '<span class="system-info">ℹ️ Info System</span>' + html.escape(str(msg.get("text", "")))
         elif msg_type == "secret_note":
-            content = '<span class="secret">🔒 Secret Note</span><small>Buka lewat panel Fitur.</small>'
+            content = '<span class="secret">🔒 Secret Note</span><small>Buka lewat panel Fitur diatas.</small>'
         elif msg_type == "one_time":
-            content = '<span class="secret">👁️ One-Time Message</span><small>Buka sekali lewat panel Fitur, lalu pesan terhapus.</small>'
+            content = '<span class="secret">👁️ One-Time Message</span><small>Buka sekali lewat panel Fitur diatas, lalu pesan terhapus.</small>'
         elif msg_type == "poll":
             question = html.escape(decrypt_room_text(room, str(msg.get("question", ""))))
             votes = msg.get("votes") if isinstance(msg.get("votes"), dict) else {}
@@ -2362,13 +2550,16 @@ def render_chat(messages: list[dict[str, Any]], username: str, room: str = "") -
                 mime = html.escape(str(msg.get("thumbnail_mime", "image/jpeg")))
                 if thumb and not thumb.startswith("["):
                     content += f'<img class="thumb" src="data:{mime};base64,{html.escape(thumb, quote=True)}" />'
-        content += reaction_html(msg) + expire_html(msg)
+        if not is_system:
+            content += reaction_html(msg) + expire_html(msg)
         pin = ' 📌' if msg.get("_pinned") else ''
-        cls = "row me" if is_me else "row"
-        dot = '<span class="user-dot" aria-hidden="true"></span>'
+        cls = "row system-row" if is_system else ("row me" if is_me else "row")
+        dot = '<span class="system-dot" aria-hidden="true"></span>' if is_system else '<span class="user-dot" aria-hidden="true"></span>'
         me_label = '<span>kamu</span>' if is_me else ''
         pin_label = '<span>📌</span>' if pin else ''
         rows += f'<div class="{cls}"><div class="bubble"{bubble_style}>{content}<div class="meta">{dot}<span>{sender_label}</span>{me_label}{pin_label}<span>{time_label}</span></div></div></div>'
+
+    countdown_payload = json.dumps(countdown_targets, ensure_ascii=False)
     return CHAT_CSS + f"""
     <div id="antitrust-chat-box" class="chat">{rows}<div id="antitrust-chat-bottom"></div></div>
     <script>
@@ -2377,6 +2568,24 @@ def render_chat(messages: list[dict[str, Any]], username: str, room: str = "") -
         // Jangan panggil scrollIntoView karena itu menggeser halaman utama Streamlit.
         if (box) box.scrollTop = box.scrollHeight;
       }}
+      const systemCountdownTargets = {countdown_payload};
+      systemCountdownTargets.forEach(function(target) {{
+        let left = Math.max(0, parseInt(target.left || 0, 10));
+        const node = document.getElementById(target.id);
+        function tickSystemCountdown() {{
+          if (!node) return;
+          const line = node.closest('.system-countdown-line');
+          if (left > 0) {{
+            node.textContent = left + ' detik';
+          }} else {{
+            if (line) line.textContent = 'Waktu habis. Room akan otomatis direvoke.';
+            else node.textContent = 'waktu habis';
+          }}
+          if (left > 0) left -= 1;
+        }}
+        tickSystemCountdown();
+        setInterval(tickSystemCountdown, 1000);
+      }});
       requestAnimationFrame(scrollLatest);
       setTimeout(scrollLatest, 80);
       setTimeout(scrollLatest, 240);
@@ -2690,7 +2899,7 @@ def render_admin_panel() -> None:
         )
         ttl = admin_duration_options[ttl_label]
         admin_room_password = st.text_input(
-            "Password pembuat room / key Fernet",
+            "Password pembuat room (min 8 karakter)",
             type="password",
             help="Password ini menurunkan Fernet key unik per room. Bagikan password secara terpisah dari invite link.",
             key="admin_creator_room_password",
@@ -2711,6 +2920,7 @@ def render_admin_panel() -> None:
             st.session_state["last_invite"] = build_invite_url(token)
             st.session_state["last_invite_token"] = token
             st.session_state["last_room"] = room
+            st.session_state["last_room_share_password"] = str(admin_room_password or "")
             st.session_state["last_invite_display_until"] = now_epoch() + 60
             st.success(f"Room otomatis `{room}` berhasil dibuat untuk {ttl_label}. Link hanya ditampilkan 1 menit, tanpa revoke.")
         if render_temporary_invite_link(
@@ -2720,6 +2930,7 @@ def render_admin_panel() -> None:
             display_until_key="last_invite_display_until",
             input_key="admin_invite_box",
             label="Link hilang dari halaman dalam",
+            password_key="last_room_share_password",
         ):
             if st.session_state.get("last_room"):
                 render_countdown("Sisa waktu room", room_seconds_left(st.session_state.get("last_room")))
@@ -2735,8 +2946,8 @@ def render_public_room_creator() -> None:
     st.markdown('<div class="terminal-card">', unsafe_allow_html=True)
     st.markdown('<div class="terminal-note">$ create_room --anonymous --random --temporary-link</div>', unsafe_allow_html=True)
     st.subheader("Buat room")
-    st.caption("Nama room dibuat otomatis dan acak. Password pembuat room juga menjadi dasar Fernet key unik room. Link hanya tampil 1 menit, tanpa revoke.")
-    creator_password = st.text_input("Password pembuat room / key Fernet", type="password", help="Password ini dipakai untuk membuka enkripsi room, revoke room, dan hapus chat. Bagikan secara terpisah dari link.", key="public_creator_room_password")
+    st.caption("Nama room dibuat otomatis dan acak. Buat password untuk kunci ruangan. Share link yang dibuat dengan klik share via Whatsapp, dan hapus setelahnya")
+    creator_password = st.text_input("Password pembuat room (min 8 karakter)", type="password", help="Password ini dipakai untuk membuka enkripsi room, revoke room, dan hapus chat. Bagikan secara terpisah dari link.", key="public_creator_room_password")
     ttl = st.slider("Durasi room", min_value=1, max_value=ROOM_MAX_TTL_MINUTES, value=ROOM_DEFAULT_TTL_MINUTES, help="Maksimal 60 menit. Tampilan link hilang otomatis setelah 1 menit, tanpa revoke.", key="public_room_ttl")
     if st.button("Create random room + link", use_container_width=True):
         if len(str(creator_password or "").strip()) < 8:
@@ -2748,6 +2959,7 @@ def render_public_room_creator() -> None:
         st.session_state["public_invite_url"] = build_invite_url(token)
         st.session_state["public_invite_token"] = token
         st.session_state["public_room"] = room
+        st.session_state["public_room_share_password"] = str(creator_password or "")
         st.session_state["public_invite_display_until"] = now_epoch() + 60
         st.success(f"Room otomatis `{room}` berhasil dibuat. Link hanya ditampilkan 1 menit, tanpa revoke.")
     if st.session_state.get("public_invite_url"):
@@ -2760,6 +2972,7 @@ def render_public_room_creator() -> None:
                 display_until_key="public_invite_display_until",
                 input_key="public_invite_box",
                 label="Link hilang dari halaman dalam",
+                password_key="public_room_share_password",
             )
         with col2:
             render_countdown("Sisa waktu room", room_seconds_left(st.session_state.get("public_room")))
@@ -2885,12 +3098,62 @@ def render_room_invite_panel(room: str, username: str) -> None:
                 token_key="room_invite_token",
                 input_key="room_invite_url_box",
                 label="Sisa waktu invite link",
+                password=st.session_state.get(room_share_password_session_key(room)),
             )
 
 
 def clear_destroy_countdown() -> None:
     for key in ("destroy_pending_room", "destroy_countdown_until"):
         st.session_state.pop(key, None)
+
+
+def render_video_call_panel(room: str, username: str) -> None:
+    data = get_room_video_call(room)
+    current_url = data.get("url", "")
+    current_note = data.get("session_note", DEFAULT_VIDEO_SESSION_NOTE)
+
+    st.markdown("**Google Meet**")
+    st.caption("Koneksi video call bisa menggunakan Google Meet. Sesi mengikuti waktu chat/room aktif, jadi patokannya adalah countdown room.")
+
+    if current_url:
+        st.success("Link Google Meet aktif untuk room ini.")
+        st.link_button("Buka Google Meet", current_url, use_container_width=True)
+        st.caption(current_note)
+    else:
+        st.info("Belum ada link Google Meet. Pembuat room bisa menambahkan link agar peserta langsung join dari panel ini.")
+
+    if not render_room_creator_unlock(room, "video_call_panel"):
+        return
+
+    with st.form(f"video_call_form::{room_key(room)}"):
+        meet_url = st.text_input("Link Google Meet", value=current_url, placeholder="https://meet.google.com/abc-defg-hij")
+        note = st.text_area("Catatan sesi", value=current_note, max_chars=240, height=76)
+        save_clicked = st.form_submit_button("Simpan info video call", use_container_width=True)
+    if save_clicked:
+        clean_url = sanitize_gmeet_url(meet_url)
+        if meet_url.strip() and not clean_url:
+            st.warning("Masukkan link Google Meet yang valid, contoh: https://meet.google.com/abc-defg-hij")
+            return
+        save_room_video_call(room, clean_url, note)
+        st.success("Info Google Meet disimpan.")
+        st.rerun()
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Kirim info ke chat", use_container_width=True, disabled=not bool(current_url), key=f"post_meet_info::{room_key(room)}"):
+            text = (
+                "Untuk koneksi video call bisa menggunakan Google Meet. "
+                "Sesi mengikuti waktu chat/room aktif. "
+                f"Link: {current_url}"
+            )
+            if not rate_limited("video_call_info"):
+                append_text(room, username, text, 0)
+                st.rerun()
+    with col2:
+        if st.button("Hapus link GMeet", use_container_width=True, disabled=not bool(current_url), key=f"clear_meet_info::{room_key(room)}"):
+            save_room_video_call(room, "", DEFAULT_VIDEO_SESSION_NOTE)
+            st.success("Link Google Meet dihapus dari room.")
+            st.rerun()
 
 
 def render_room_actions(room: str, username: str) -> None:
@@ -2960,12 +3223,27 @@ def render_panic(room: str) -> None:
 
 
 def prepare_messages_for_render(room: str, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    pinned_id = get_room_config(room).get("pinned_message_id", "")
+    config = get_room_config(room)
+    pinned_id = config.get("pinned_message_id", "")
     prepared = []
     for msg in messages:
         copy_msg = dict(msg)
         copy_msg["_pinned"] = bool(pinned_id and str(copy_msg.get("id")) == pinned_id)
         prepared.append(copy_msg)
+
+    # Tambahkan pesan virtual dari sistem saat sisa waktu room tinggal 30 detik.
+    # Pesan ini tidak ditulis ke chat_rooms.json, jadi tidak menumpuk tiap detik.
+    left = room_seconds_left(room)
+    if 0 <= left <= 30:
+        prepared.append({
+            "id": f"system-room-countdown-{config.get('room_key', room_key(room))}-{config.get('expires_at', 0)}",
+            "type": "system_countdown",
+            "username": "System",
+            "time": now_wib_label(),
+            "seconds_left": int(left),
+            "created_at": now_epoch(),
+            "expires_at": int(config.get("expires_at", 0) or 0),
+        })
     return prepared
 
 
@@ -3066,7 +3344,7 @@ def render_feature_panel(room: str, username: str, messages: list[dict[str, Any]
 def render_message_form(room: str, username: str) -> None:
     with st.container(border=True):
         st.markdown("**Kirim**")
-        tab_text, tab_ping, tab_special, tab_self, tab_img, tab_voice, tab_doc = st.tabs(["Text", "Ping", "Secret", "Self-destruct", "Image", "Voice", "Doc"])
+        tab_text, tab_ping, tab_special, tab_self, tab_img, tab_voice, tab_doc = st.tabs(["| Text |", "| Ping |", "| Secret |", "| Self-destruct |", "| Image |", "| Voice |", "| Doc |"])
         with tab_text:
             with st.form("text-message", clear_on_submit=True):
                 message = st.text_input(
@@ -3271,9 +3549,11 @@ def render_online_users(entries: list[dict[str, Any]], current_username: str) ->
 
 def render_compact_room_panel(room: str, username: str, messages: list[dict[str, Any]]) -> None:
     with st.expander("Panel room", expanded=False):
-        tab_invite, tab_features, tab_files, tab_security = st.tabs(["Invite", "Fitur", "File", "Aksi"])
+        tab_invite, tab_video, tab_features, tab_files, tab_security = st.tabs(["| Invite |", "| Video Call |", "| Fitur |", "| File |", "| Aksi |"])
         with tab_invite:
             render_room_invite_panel(room, username)
+        with tab_video:
+            render_video_call_panel(room, username)
         with tab_features:
             render_feature_panel(room, username, messages)
         with tab_files:
@@ -3298,9 +3578,9 @@ def render_room_password_unlock(room: str) -> bool:
     st.markdown('<div class="terminal-card">', unsafe_allow_html=True)
     st.markdown('<div class="terminal-note">$ unlock_room_key --password-derived-fernet</div>', unsafe_allow_html=True)
     st.subheader("Unlock enkripsi room")
-    st.caption("Room ini memakai Fernet key unik yang diturunkan dari Password pembuat room. Masukkan password yang dibuat saat room dibuat.")
+    st.caption("Room ini memakai Fernet key unik yang diturunkan dari Password pembuat room. Masukkan password yang diberikan, jika gagal copy paste, silahkan ketikkan manual.")
     with st.form(f"room_crypto_unlock::{room_key(room)}"):
-        password = st.text_input("Password pembuat room", type="password")
+        password = st.text_input("Masukkan Password yang diberikan (Perhatikan huruf besar dan kecil)", type="password")
         submitted = st.form_submit_button("Unlock room", use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
     if not submitted:
@@ -3409,6 +3689,12 @@ def main() -> None:
         unsafe_allow_html=True,
     )
     render_online_users(online_entries, username)
+    video_call = get_room_video_call(room)
+    if video_call.get("url"):
+        with st.container(border=True):
+            st.markdown("**Video call:** Google Meet")
+            st.caption(video_call.get("session_note", DEFAULT_VIDEO_SESSION_NOTE))
+            st.link_button("Join Google Meet", video_call["url"], use_container_width=True)
     render_sound_notice(latest_foreign_signature(messages, username), sound)
     render_pinned_message(room, messages)
     render_compact_room_panel(room, username, messages)
