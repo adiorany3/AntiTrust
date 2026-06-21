@@ -15,3 +15,10 @@ Perubahan terbaru:
 - Dropdown/selectbox diperkuat dengan latar putih, teks gelap, kontras tinggi, dan area pilihan yang lebih besar agar nyaman di desktop maupun HP.
 - Chat bubble, kartu status, tombol, tab, dan sidebar dibuat lebih sederhana sehingga pengguna baru lebih mudah memahami alur aplikasi.
 - Layout tetap responsif: tab dapat digeser di layar kecil, tombol tetap besar, dan input memakai ukuran font aman untuk browser mobile.
+
+### Pembaruan keterbacaan form
+
+- Box ketik, textarea, dan dropdown sekarang memakai border 2px, fokus biru, latar putih, dan teks gelap agar mudah dibedakan dari background.
+- Menu dropdown dibuat kontras tinggi dengan item lebih besar, cocok untuk desktop maupun browser HP.
+- Area upload file diberi garis putus-putus yang lebih jelas sebagai drop zone.
+

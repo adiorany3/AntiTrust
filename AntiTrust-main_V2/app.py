@@ -536,6 +536,247 @@ iframe[title="st.iframe"]{display:block!important;border-radius:18px!important;b
 </style>
 """
 
+FORM_READABILITY_CSS = """
+<style>
+/* Final readability pass: form controls are intentionally high-contrast. */
+:root{
+  --field-bg:#ffffff;
+  --field-bg-soft:#f8fafc;
+  --field-text:#0f172a;
+  --field-muted:#475569;
+  --field-placeholder:#64748b;
+  --field-border:#94a3b8;
+  --field-border-hover:#64748b;
+  --field-focus:#2563eb;
+  --field-focus-ring:rgba(37,99,235,.22);
+  --field-error:#dc2626;
+}
+
+/* Label dibuat tegas supaya pengguna tahu area mana yang harus diisi. */
+div[data-testid="stTextInput"],
+div[data-testid="stTextArea"],
+div[data-testid="stNumberInput"],
+div[data-testid="stDateInput"],
+div[data-testid="stTimeInput"],
+div[data-testid="stSelectbox"],
+div[data-testid="stMultiSelect"],
+div[data-testid="stFileUploader"]{
+  margin-bottom:.44rem!important;
+}
+div[data-testid="stWidgetLabel"] label,
+div[data-testid="stWidgetLabel"] p,
+[data-testid="stWidgetLabel"] *,
+.stTextInput label,
+.stTextArea label,
+.stNumberInput label,
+.stDateInput label,
+.stTimeInput label,
+.stSelectbox label,
+.stMultiSelect label,
+.stFileUploader label{
+  color:#0f172a!important;
+  font-weight:800!important;
+  font-size:.93rem!important;
+  line-height:1.32!important;
+  opacity:1!important;
+}
+
+/* Wrapper BaseWeb diberi border 2px agar box ketik/dropdown tidak menyatu dengan kartu putih. */
+div[data-baseweb="input"],
+div[data-baseweb="textarea"],
+div[data-baseweb="select"] > div{
+  min-height:46px!important;
+  background:var(--field-bg)!important;
+  color:var(--field-text)!important;
+  border:2px solid var(--field-border)!important;
+  border-radius:14px!important;
+  box-shadow:0 1px 2px rgba(15,23,42,.08), inset 0 1px 0 rgba(255,255,255,.90)!important;
+  transition:border-color .15s ease, box-shadow .15s ease, background .15s ease!important;
+}
+div[data-baseweb="textarea"]{min-height:auto!important;}
+div[data-baseweb="input"]:hover,
+div[data-baseweb="textarea"]:hover,
+div[data-baseweb="select"]:hover > div{
+  border-color:var(--field-border-hover)!important;
+  box-shadow:0 2px 7px rgba(15,23,42,.10), inset 0 1px 0 rgba(255,255,255,.94)!important;
+}
+div[data-baseweb="input"]:focus-within,
+div[data-baseweb="textarea"]:focus-within,
+div[data-baseweb="select"]:focus-within > div{
+  border-color:var(--field-focus)!important;
+  box-shadow:0 0 0 4px var(--field-focus-ring), 0 2px 7px rgba(15,23,42,.10)!important;
+  background:#ffffff!important;
+}
+
+/* Isi input dibuat transparan karena border utama ada di wrapper. */
+div[data-baseweb="input"] input,
+div[data-baseweb="textarea"] textarea,
+.stTextInput input,
+.stTextArea textarea,
+.stNumberInput input,
+.stDateInput input,
+.stTimeInput input{
+  color:var(--field-text)!important;
+  background:transparent!important;
+  border:0!important;
+  box-shadow:none!important;
+  outline:none!important;
+  font-size:15.5px!important;
+  font-weight:600!important;
+  caret-color:var(--field-focus)!important;
+  -webkit-text-fill-color:var(--field-text)!important;
+}
+.stTextArea textarea,
+div[data-baseweb="textarea"] textarea{
+  line-height:1.55!important;
+  padding-top:10px!important;
+  padding-bottom:10px!important;
+}
+.stTextInput input::placeholder,
+.stTextArea textarea::placeholder,
+.stNumberInput input::placeholder,
+div[data-baseweb="input"] input::placeholder,
+div[data-baseweb="textarea"] textarea::placeholder{
+  color:var(--field-placeholder)!important;
+  opacity:1!important;
+  font-weight:500!important;
+}
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus{
+  -webkit-text-fill-color:var(--field-text)!important;
+  -webkit-box-shadow:0 0 0 1000px #ffffff inset!important;
+  box-shadow:0 0 0 1000px #ffffff inset!important;
+}
+
+/* Dropdown/selectbox: nilai terpilih, panah, dan daftar pilihan dibuat sangat jelas. */
+.stSelectbox div[data-baseweb="select"],
+.stMultiSelect div[data-baseweb="select"]{
+  border-radius:14px!important;
+}
+div[data-baseweb="select"] span,
+div[data-baseweb="select"] input,
+div[data-baseweb="select"] div{
+  color:var(--field-text)!important;
+  opacity:1!important;
+  text-shadow:none!important;
+  font-weight:650!important;
+}
+div[data-baseweb="select"] svg{
+  color:#334155!important;
+  fill:#334155!important;
+  opacity:1!important;
+}
+div[data-baseweb="select"] [aria-disabled="true"],
+div[data-baseweb="select"] [disabled]{
+  color:#64748b!important;
+  opacity:1!important;
+}
+
+/* Menu dropdown sering dirender di portal terpisah; selector ini dibuat global dan lebih spesifik. */
+div[data-baseweb="popover"],
+div[data-baseweb="popover"] > div,
+div[data-baseweb="menu"],
+ul[role="listbox"],
+div[role="listbox"]{
+  background:#ffffff!important;
+  color:var(--field-text)!important;
+  border:2px solid var(--field-border)!important;
+  border-radius:14px!important;
+  box-shadow:0 22px 54px rgba(15,23,42,.22)!important;
+  overflow:hidden!important;
+}
+ul[role="listbox"],
+div[role="listbox"]{
+  padding:4px!important;
+  max-height:min(360px, 70vh)!important;
+}
+li[role="option"],
+div[role="option"],
+div[data-baseweb="menu"] li,
+div[data-baseweb="menu"] [role="option"]{
+  min-height:44px!important;
+  padding:10px 12px!important;
+  background:#ffffff!important;
+  color:var(--field-text)!important;
+  border-radius:10px!important;
+  border:1px solid transparent!important;
+  display:flex!important;
+  align-items:center!important;
+  font-size:15px!important;
+  font-weight:650!important;
+  line-height:1.35!important;
+}
+li[role="option"] *,
+div[role="option"] *,
+div[data-baseweb="menu"] li *,
+div[data-baseweb="menu"] [role="option"] *{
+  color:var(--field-text)!important;
+  opacity:1!important;
+  text-shadow:none!important;
+}
+li[role="option"]:hover,
+div[role="option"]:hover,
+li[role="option"][aria-selected="true"],
+div[role="option"][aria-selected="true"],
+li[role="option"][data-highlighted="true"],
+div[role="option"][data-highlighted="true"]{
+  background:#dbeafe!important;
+  color:#1e40af!important;
+  border-color:#93c5fd!important;
+}
+li[role="option"]:hover *,
+div[role="option"]:hover *,
+li[role="option"][aria-selected="true"] *,
+div[role="option"][aria-selected="true"] *{
+  color:#1e40af!important;
+}
+
+/* Checkbox/radio juga dibuat lebih jelas. */
+.stCheckbox label,
+.stRadio label{
+  color:#0f172a!important;
+  font-weight:700!important;
+}
+.stCheckbox span,
+.stRadio span{
+  color:#0f172a!important;
+}
+
+/* File uploader diberi area beda warna agar terlihat sebagai drop zone. */
+div[data-testid="stFileUploader"] section{
+  background:#f8fafc!important;
+  border:2px dashed var(--field-border)!important;
+  border-radius:16px!important;
+}
+div[data-testid="stFileUploader"] section:hover{
+  border-color:var(--field-focus)!important;
+  background:#eff6ff!important;
+}
+
+/* Pada layar HP, ukuran font input minimal 16px agar browser tidak auto-zoom. */
+@media (max-width:760px){
+  div[data-baseweb="input"] input,
+  div[data-baseweb="textarea"] textarea,
+  .stTextInput input,
+  .stTextArea textarea,
+  .stNumberInput input,
+  .stDateInput input,
+  .stTimeInput input,
+  li[role="option"],
+  div[role="option"]{
+    font-size:16px!important;
+  }
+  div[data-baseweb="input"],
+  div[data-baseweb="textarea"],
+  div[data-baseweb="select"] > div{
+    min-height:48px!important;
+    border-radius:13px!important;
+  }
+}
+</style>
+"""
+
 CHAT_CSS = """
 <style>
 :root{
@@ -1727,8 +1968,8 @@ def render_countdown(label: str, seconds_left: int) -> None:
     safe_id = "countdown_" + hashlib.sha1(f"{label}:{seconds_left}:{time.time_ns()}".encode()).hexdigest()[:12]
     components.html(
         f"""
-        <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;border:1px solid rgba(255,255,255,.22);border-radius:15px;padding:5px 8px;background:rgba(255,255,255,.10);backdrop-filter:blur(18px);color:inherit">
-          <div style="font-size:10px;opacity:.72;margin-bottom:0">{safe_label}</div>
+        <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;border:1px solid #d7dee9;border-radius:15px;padding:5px 8px;background:#ffffff;color:#0f172a;box-shadow:0 1px 2px rgba(15,23,42,.08)">
+          <div style="font-size:10px;color:#64748b;opacity:1;margin-bottom:0">{safe_label}</div>
           <div id="{safe_id}" style="font-size:16px;font-weight:800;letter-spacing:-.04em">{format_countdown(seconds_left)}</div>
         </div>
         <script>
@@ -1935,7 +2176,7 @@ def render_sound_notice(signature: str, enabled: bool) -> None:
     components.html(
         f"""
         <div id="sound-wrap" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;margin:0;padding:0">
-          <button id="sound-toggle" style="width:100%;border:1px solid rgba(120,145,180,.28);border-radius:999px;padding:6px 10px;background:rgba(255,255,255,.14);color:inherit;cursor:pointer;font-size:12px;font-weight:800;backdrop-filter:blur(14px)">🔔 Aktifkan suara pesan masuk</button>
+          <button id="sound-toggle" style="width:100%;border:1px solid #93c5fd;border-radius:999px;padding:8px 12px;background:#eff6ff;color:#1e40af;cursor:pointer;font-size:12px;font-weight:800">🔔 Aktifkan suara pesan masuk</button>
           <span id="sound-state" style="display:block;margin-top:3px;font-size:10px;opacity:.68;text-align:center"></span>
         </div>
         <script>
@@ -2611,7 +2852,7 @@ def render_invite_expiry_redirect(seconds_left: int) -> None:
 def main() -> None:
     ensure_dirs()
     st.set_page_config(page_title=APP_TITLE, page_icon=APP_ICON, layout="centered")
-    st.markdown(CSS, unsafe_allow_html=True)
+    st.markdown(CSS + FORM_READABILITY_CSS, unsafe_allow_html=True)
     destroyed = purge_inactive_rooms()
     auto_refresh, interval, sound = render_sidebar()
     if destroyed:
