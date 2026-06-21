@@ -777,6 +777,145 @@ div[data-testid="stFileUploader"] section:hover{
 </style>
 """
 
+
+ADMIN_PANEL_FIX_CSS = """
+<style>
+/* Admin panel readability fix: avoid stacked/overlapping text, especially on mobile. */
+[data-testid="stExpander"]{
+  overflow:visible!important;
+  margin-top:.55rem!important;
+}
+[data-testid="stExpander"] summary{
+  min-height:52px!important;
+  display:flex!important;
+  align-items:center!important;
+  gap:10px!important;
+  white-space:normal!important;
+  overflow:visible!important;
+  line-height:1.35!important;
+}
+[data-testid="stExpander"] summary *{
+  white-space:normal!important;
+  overflow:visible!important;
+  text-overflow:clip!important;
+  line-height:1.35!important;
+}
+[data-testid="stExpander"] details,
+[data-testid="stExpander"] div{
+  overflow:visible!important;
+}
+
+.admin-heading-card{
+  display:block;
+  width:100%;
+  box-sizing:border-box;
+  margin:.25rem 0 .8rem;
+  padding:16px 18px;
+  border:1px solid #d7dee9;
+  border-radius:18px;
+  background:#ffffff;
+  box-shadow:0 8px 22px rgba(15,23,42,.07);
+}
+.admin-heading-card h3{
+  margin:0 0 6px!important;
+  font-size:1.22rem!important;
+  line-height:1.3!important;
+  color:#0f172a!important;
+}
+.admin-heading-card p{
+  margin:0!important;
+  color:#475569!important;
+  line-height:1.55!important;
+  font-size:.94rem!important;
+}
+.admin-room-summary{
+  display:flex;
+  flex-wrap:wrap;
+  gap:7px;
+  margin:8px 0 10px;
+}
+.admin-room-summary span{
+  display:inline-flex;
+  align-items:center;
+  max-width:100%;
+  padding:6px 10px;
+  border-radius:999px;
+  background:#f8fafc;
+  border:1px solid #d7dee9;
+  color:#334155!important;
+  font-size:.83rem!important;
+  line-height:1.25!important;
+  font-weight:700!important;
+}
+.admin-room-users{
+  padding:9px 11px;
+  margin:8px 0;
+  border:1px solid #d7dee9;
+  border-radius:13px;
+  background:#f8fafc;
+  color:#334155!important;
+  line-height:1.45!important;
+  overflow-wrap:anywhere;
+}
+.admin-room-title{
+  margin:2px 0 0!important;
+  font-size:1.02rem!important;
+  line-height:1.36!important;
+  color:#0f172a!important;
+  overflow-wrap:anywhere!important;
+}
+.admin-action-note{
+  display:block;
+  margin:.4rem 0 .15rem;
+  color:#64748b!important;
+  font-size:.85rem!important;
+  line-height:1.45!important;
+}
+
+/* Keep all admin-area widgets readable; long labels wrap instead of stacking. */
+[data-testid="stWidgetLabel"],
+[data-testid="stWidgetLabel"] *,
+.stCheckbox label,
+.stCheckbox label *,
+.stButton button,
+.stFormSubmitButton button{
+  white-space:normal!important;
+  overflow:visible!important;
+  text-overflow:clip!important;
+  line-height:1.35!important;
+}
+.stButton button,
+.stFormSubmitButton button{
+  min-height:46px!important;
+  padding:.58rem .85rem!important;
+}
+.stCheckbox label{
+  align-items:flex-start!important;
+  gap:8px!important;
+}
+
+@media (max-width:760px){
+  .admin-heading-card{
+    padding:14px 13px;
+    border-radius:16px;
+  }
+  .admin-heading-card h3{font-size:1.08rem!important;}
+  .admin-heading-card p{font-size:.88rem!important;}
+  .admin-room-summary{gap:6px;}
+  .admin-room-summary span{
+    width:100%;
+    justify-content:flex-start;
+    border-radius:12px;
+    font-size:.84rem!important;
+  }
+  [data-testid="stExpander"] summary{
+    min-height:50px!important;
+    padding:.8rem .9rem!important;
+  }
+}
+</style>
+"""
+
 CHAT_CSS = """
 <style>
 :root{
@@ -2237,48 +2376,94 @@ def render_sound_notice(signature: str, enabled: bool) -> None:
 
 def render_admin_panel() -> None:
     admin_password = get_secret("CHAT_ADMIN_PASSWORD", "")
-    with st.container(border=True):
-        st.subheader("Admin")
-        if not admin_password:
-            st.error("Set CHAT_ADMIN_PASSWORD di Streamlit Secrets atau environment variable dulu.")
-            st.code('CHAT_ADMIN_PASSWORD = "password-yang-kuat"\nFERNET_KEY = "hasil-generate-fernet-key"\nPUBLIC_APP_URL = "https://nama-app.streamlit.app"')
-            return
-        if not st.session_state.get("admin_ok"):
-            password = st.text_input("Password admin", type="password")
-            if st.button("Login admin", use_container_width=True):
-                if hmac.compare_digest(password, admin_password):
-                    st.session_state["admin_ok"] = True
-                    st.rerun()
-                else:
-                    st.error("Password salah.")
-            return
+    st.markdown(
+        """
+        <div class="admin-heading-card">
+          <h3>Admin Panel</h3>
+          <p>Kelola room, invite link, dan revoke sesi dari satu tempat. Layout dibuat vertikal agar teks, tombol, dan dropdown tidak saling menumpuk di HP.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-        st.success("Admin aktif")
-        room = st.text_input("Nama room tujuan", placeholder="kelas-private-01")
-        ttl = st.slider("Masa aktif room & invite link", min_value=1, max_value=ROOM_MAX_TTL_MINUTES, value=ROOM_DEFAULT_TTL_MINUTES, help="Maksimal 1 jam. Saat waktu habis, room otomatis dihancurkan dan semua invite link direvoke.")
-        if st.button("Buat room + invite link", use_container_width=True):
-            room = clean_room_name(room)
-            if not room:
-                st.warning("Nama room tidak boleh kosong.")
+    if not admin_password:
+        st.error("Set CHAT_ADMIN_PASSWORD di Streamlit Secrets atau environment variable dulu.")
+        st.code('CHAT_ADMIN_PASSWORD = "password-yang-kuat"\nFERNET_KEY = "hasil-generate-fernet-key"\nPUBLIC_APP_URL = "https://nama-app.streamlit.app"')
+        return
+
+    if not st.session_state.get("admin_ok"):
+        password = st.text_input("Password admin", type="password", key="admin_login_password")
+        if st.button("Login admin", use_container_width=True, key="admin_login_button"):
+            if hmac.compare_digest(password, admin_password):
+                st.session_state["admin_ok"] = True
+                st.rerun()
             else:
-                token = create_room_with_invite(room, int(ttl), "admin")
-                st.session_state["last_invite"] = build_invite_url(token)
-                st.session_state["last_invite_token"] = token
-                st.session_state["last_room"] = room
-                st.success("Room dan invite link berhasil dibuat.")
-        if render_expiring_invite_link(
-            url_key="last_invite",
-            token_key="last_invite_token",
-            room_key="last_room",
-            input_key="admin_invite_box",
-            label="Sisa waktu link",
-        ):
-            if st.session_state.get("last_room"):
-                render_countdown("Sisa waktu room", room_seconds_left(st.session_state.get("last_room")))
-        if st.button("Logout admin", use_container_width=True):
-            st.session_state.pop("admin_ok", None)
-            st.rerun()
+                st.error("Password salah.")
+        return
 
+    st.success("Admin aktif")
+    st.caption("Nama room dibuat otomatis dan acak. Room baru memakai Fernet key unik dari Password pembuat room. Simpan password ini karena dibutuhkan untuk membuka isi chat.")
+
+    admin_duration_options = {
+        "1 jam": 60,
+        "3 jam": 180,
+        "6 jam": 360,
+        "12 jam": 720,
+        "24 jam": 1440,
+        "3 hari": 4320,
+        "7 hari": 10080,
+    }
+    ttl_label = st.selectbox(
+        "Masa aktif room & invite link",
+        options=list(admin_duration_options.keys()),
+        index=4,
+        help="Khusus admin bisa membuat room lebih lama, maksimal 7 hari. Tampilan link tetap hanya muncul 1 menit setelah dibuat, tanpa revoke.",
+        key="admin_room_ttl_select",
+    )
+    ttl = admin_duration_options[ttl_label]
+    admin_room_password = st.text_input(
+        "Password pembuat room (min 8 karakter)",
+        type="password",
+        help="Password ini menurunkan Fernet key unik per room. Bagikan password secara terpisah dari invite link.",
+        key="admin_creator_room_password",
+    )
+    if st.button("Buat room otomatis + invite link", use_container_width=True, key="admin_create_room_button"):
+        if len(str(admin_room_password or "").strip()) < 8:
+            st.warning("Password pembuat room minimal 8 karakter agar key Fernet lebih kuat.")
+            return
+        room = generate_random_room_name("admin")
+        token = create_room_with_invite(
+            room,
+            int(ttl),
+            "admin",
+            admin_room_password,
+            max_lifetime_minutes=ADMIN_ROOM_MAX_TTL_MINUTES,
+            max_invite_ttl_minutes=ADMIN_ROOM_MAX_TTL_MINUTES,
+        )
+        st.session_state["last_invite"] = build_invite_url(token)
+        st.session_state["last_invite_token"] = token
+        st.session_state["last_room"] = room
+        st.session_state["last_room_share_password"] = str(admin_room_password or "")
+        st.session_state["last_invite_display_until"] = now_epoch() + 60
+        st.success(f"Room otomatis `{room}` berhasil dibuat untuk {ttl_label}. Link hanya ditampilkan 1 menit, tanpa revoke.")
+
+    if render_temporary_invite_link(
+        url_key="last_invite",
+        token_key="last_invite_token",
+        room_key="last_room",
+        display_until_key="last_invite_display_until",
+        input_key="admin_invite_box",
+        label="Link hilang dari halaman dalam",
+        password_key="last_room_share_password",
+    ):
+        if st.session_state.get("last_room"):
+            render_countdown("Sisa waktu room", room_seconds_left(st.session_state.get("last_room")))
+
+    render_admin_active_rooms_panel()
+
+    if st.button("Logout admin", use_container_width=True, key="admin_logout_button"):
+        st.session_state.pop("admin_ok", None)
+        st.rerun()
 
 def render_public_room_creator() -> None:
     with st.container(border=True):
@@ -2326,7 +2511,7 @@ def render_landing() -> None:
     st.markdown('<div class="hero"><span class="badge">🔐 secure</span><span class="badge">60 menit</span><span class="badge">auto revoke</span><h1>AntiTrust</h1><p class="muted">Room terenkripsi sementara. Share link, auto revoke.</p></div>', unsafe_allow_html=True)
     st.caption("Ruang bebas berbicara, namun harus tetap bertanggungjawab")
     render_public_room_creator()
-    with st.expander("Admin panel", expanded=False):
+    with st.expander("🔧 Admin Panel", expanded=False):
         render_admin_panel()
 
 

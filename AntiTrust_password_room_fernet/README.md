@@ -97,3 +97,7 @@ PY
 - Menu dropdown dibuat kontras tinggi dengan item lebih besar, cocok untuk desktop maupun browser HP.
 - Area upload file diberi garis putus-putus yang lebih jelas sebagai drop zone.
 
+
+## Perbaikan Admin Panel & Keterbacaan Form
+
+Versi ini memperbaiki tampilan Admin Panel agar tidak tertumpuk, terutama di layar HP. Area admin sekarang memakai layout vertikal, label yang bisa membungkus baris, tombol lebih tinggi, dan ringkasan room dalam bentuk chip agar teks panjang tidak saling menimpa. Dropdown, input, checkbox, dan expander juga diberi jarak serta kontras yang lebih tegas.
