@@ -71,6 +71,12 @@ ADMIN_ROOM_DEFAULT_TTL_MINUTES = 1440  # 24 jam
 RESERVED_DISPLAY_NAMES = {"adioranye", "galuh adi insani"}
 VIDEO_CALL_PROVIDER = "Google Meet"
 DEFAULT_VIDEO_SESSION_NOTE = "Sesi video call mengikuti waktu chat/room aktif. Gunakan countdown room sebagai patokan."
+DEFAULT_MAX_PARTICIPANTS = 8
+ROOM_MAX_PARTICIPANTS = 20
+AUDIT_LOG_LIMIT = 80
+PASSWORD_FAIL_LIMIT = 5
+PASSWORD_FAIL_BLOCK_SECONDS = 300
+
 
 ALLOWED_IMAGE_TYPES = {"png", "jpg", "jpeg", "webp"}
 ALLOWED_AUDIO_TYPES = {"wav", "mp3", "ogg", "m4a", "aac", "flac", "webm"}
@@ -966,13 +972,19 @@ def derive_room_fernet_key(room: str, password: str, salt_b64: str) -> bytes:
 
 def remember_room_password(room: str, password: str) -> bool:
     clean_password = str(password or "")
-    if not verify_room_creator_password(room, clean_password):
+    if room_password_block_seconds(room) > 0:
         return False
+    if not verify_room_creator_password(room, clean_password):
+        record_room_password_attempt(room, False)
+        return False
+    record_room_password_attempt(room, True)
     salt = room_crypto_salt(room)
     if salt:
         st.session_state[room_crypto_session_key(room)] = derive_room_fernet_key(room, clean_password, salt).decode("ascii")
-    # Password yang benar juga membuka aksi pembuat room dan bisa dipakai untuk share WhatsApp.
-    st.session_state[room_creator_session_key(room)] = True
+    # Kompatibilitas: room lama yang belum punya PIN aksi pembuat tetap memakai password room untuk aksi sensitif.
+    # Room baru memakai owner_action_hash, sehingga password room hanya membuka enkripsi dan tidak otomatis memberi hak revoke/settings.
+    if not room_has_owner_pin(room):
+        st.session_state[room_creator_session_key(room)] = True
     st.session_state[room_share_password_session_key(room)] = clean_password
     return True
 
@@ -1367,6 +1379,17 @@ def get_room_config(room: str) -> dict[str, Any]:
     minutes = config.get("auto_destroy_minutes", DEFAULT_DESTROY_MINUTES)
     if minutes not in {5, 10, 20, 30, 60}:
         minutes = DEFAULT_DESTROY_MINUTES
+    try:
+        max_participants = int(config.get("max_participants", DEFAULT_MAX_PARTICIPANTS) or DEFAULT_MAX_PARTICIPANTS)
+    except Exception:
+        max_participants = DEFAULT_MAX_PARTICIPANTS
+    max_participants = min(max(1, max_participants), ROOM_MAX_PARTICIPANTS)
+    locked_sessions = config.get("locked_session_ids", [])
+    if not isinstance(locked_sessions, list):
+        locked_sessions = []
+    audit_log = config.get("audit_log", [])
+    if not isinstance(audit_log, list):
+        audit_log = []
     return {
         "room_key": key,
         "room_cipher": config.get("room_cipher", encrypt_text(room)),
@@ -1378,11 +1401,19 @@ def get_room_config(room: str) -> dict[str, Any]:
         "destroyed_at": int(config.get("destroyed_at", 0)),
         "pinned_message_id": str(config.get("pinned_message_id", "") or ""),
         "creator_password_hash": str(config.get("creator_password_hash", "") or ""),
+        "owner_action_hash": str(config.get("owner_action_hash", "") or ""),
         "room_fernet_salt": str(config.get("room_fernet_salt", "") or ""),
         "room_crypto_version": int(config.get("room_crypto_version", 1 if not config.get("room_fernet_salt") else ROOM_CRYPTO_VERSION)),
         "video_call_provider": str(config.get("video_call_provider", VIDEO_CALL_PROVIDER) or VIDEO_CALL_PROVIDER),
         "video_call_url_cipher": str(config.get("video_call_url_cipher", "") or ""),
         "video_session_note_cipher": str(config.get("video_session_note_cipher", "") or ""),
+        "video_call_visible": bool(config.get("video_call_visible", False)),
+        "is_locked": bool(config.get("is_locked", False)),
+        "locked_at": int(config.get("locked_at", 0) or 0),
+        "locked_by_cipher": str(config.get("locked_by_cipher", "") or ""),
+        "locked_session_ids": [str(x) for x in locked_sessions if str(x)],
+        "max_participants": max_participants,
+        "audit_log": audit_log[-AUDIT_LOG_LIMIT:],
     }
 
 
@@ -1390,6 +1421,180 @@ def save_room_config(room: str, config: dict[str, Any]) -> None:
     settings = load_json(ROOM_SETTINGS_FILE)
     settings[room_key(room)] = config
     atomic_write_json(ROOM_SETTINGS_FILE, settings)
+
+def owner_pin_digest(room: str, pin: str) -> str:
+    """Hash PIN aksi pembuat tanpa menyimpan PIN asli."""
+    clean_pin = str(pin or "")
+    return hmac_digest(f"room-owner-pin::{room_key(room)}::{clean_pin}")
+
+
+def generate_owner_pin() -> str:
+    """PIN singkat untuk aksi pembuat; ditampilkan hanya ke pembuat saat room dibuat."""
+    return secrets.token_urlsafe(7).replace("-", "").replace("_", "")[:10]
+
+
+def room_has_owner_pin(room: str) -> bool:
+    return bool(get_room_config(room).get("owner_action_hash"))
+
+
+def verify_room_owner_pin(room: str, pin: str) -> bool:
+    stored = str(get_room_config(room).get("owner_action_hash", "") or "")
+    if not stored:
+        return False
+    return hmac.compare_digest(stored, owner_pin_digest(room, str(pin or "")))
+
+
+def password_guard_key(room: str) -> str:
+    return "room_password_guard::" + room_key(room)
+
+
+def room_password_block_seconds(room: str) -> int:
+    state = st.session_state.get(password_guard_key(room), {})
+    if not isinstance(state, dict):
+        return 0
+    return max(0, int(state.get("blocked_until", 0) or 0) - now_epoch())
+
+
+def record_room_password_attempt(room: str, success: bool) -> None:
+    key = password_guard_key(room)
+    if success:
+        st.session_state.pop(key, None)
+        return
+    state = st.session_state.get(key, {})
+    if not isinstance(state, dict):
+        state = {}
+    failures = int(state.get("failures", 0) or 0) + 1
+    state["failures"] = failures
+    state["last_failed_at"] = now_epoch()
+    if failures >= PASSWORD_FAIL_LIMIT:
+        state["blocked_until"] = now_epoch() + PASSWORD_FAIL_BLOCK_SECONDS
+    st.session_state[key] = state
+
+
+def remember_room_owner_pin(room: str, pin: str) -> bool:
+    if room_password_block_seconds(room) > 0:
+        return False
+    if not verify_room_owner_pin(room, str(pin or "")):
+        record_room_password_attempt(room, False)
+        return False
+    record_room_password_attempt(room, True)
+    st.session_state[room_creator_session_key(room)] = True
+    grant_current_session_room_access(room)
+    append_audit_event(room, "owner_unlocked", "pembuat", "Akses aksi pembuat dibuka di sesi ini.")
+    return True
+
+
+def make_audit_event(event_type: str, actor: str = "", detail: str = "") -> dict[str, Any]:
+    return {
+        "at": now_epoch(),
+        "time": now_wib_label(),
+        "event": str(event_type or "event")[:64],
+        "actor_cipher": encrypt_text(str(actor or "")[:80]) if actor else "",
+        "detail_cipher": encrypt_text(str(detail or "")[:220]) if detail else "",
+    }
+
+
+def push_audit_event_to_config(config: dict[str, Any], event_type: str, actor: str = "", detail: str = "") -> None:
+    audit_log = config.get("audit_log", [])
+    if not isinstance(audit_log, list):
+        audit_log = []
+    audit_log.append(make_audit_event(event_type, actor, detail))
+    config["audit_log"] = audit_log[-AUDIT_LOG_LIMIT:]
+
+
+def append_audit_event(room: str, event_type: str, actor: str = "", detail: str = "") -> None:
+    config = get_room_config(room)
+    push_audit_event_to_config(config, event_type, actor, detail)
+    save_room_config(room, config)
+
+
+def get_room_audit_events(room: str) -> list[dict[str, Any]]:
+    config = get_room_config(room)
+    events = config.get("audit_log", []) if isinstance(config.get("audit_log"), list) else []
+    decoded: list[dict[str, Any]] = []
+    for event in events[-AUDIT_LOG_LIMIT:]:
+        if not isinstance(event, dict):
+            continue
+        actor = decrypt_optional_config_text(str(event.get("actor_cipher", "") or ""), "")
+        detail = decrypt_optional_config_text(str(event.get("detail_cipher", "") or ""), "")
+        decoded.append({
+            "time": str(event.get("time", "")),
+            "event": str(event.get("event", "event")),
+            "actor": actor,
+            "detail": detail,
+        })
+    return decoded
+
+
+def grant_current_session_room_access(room: str) -> None:
+    config = get_room_config(room)
+    sid = get_session_id()
+    locked_sessions = [str(x) for x in config.get("locked_session_ids", []) if str(x)]
+    if sid not in locked_sessions:
+        locked_sessions.append(sid)
+        config["locked_session_ids"] = locked_sessions[-ROOM_MAX_PARTICIPANTS:]
+        save_room_config(room, config)
+
+
+def current_session_has_room_access(room: str) -> bool:
+    config = get_room_config(room)
+    if not config.get("is_locked"):
+        return True
+    if room_creator_is_unlocked(room):
+        return True
+    sid = get_session_id()
+    if sid in set(config.get("locked_session_ids", [])):
+        return True
+    online = load_json(ONLINE_FILE)
+    active = normalize_online_entries(online.get(room_key(room), {}))
+    return sid in active
+
+
+def active_session_count(room: str) -> int:
+    online = load_json(ONLINE_FILE)
+    active = normalize_online_entries(online.get(room_key(room), {}))
+    return len(active)
+
+
+def room_join_block_reason(room: str) -> str:
+    config = get_room_config(room)
+    sid = get_session_id()
+    online = load_json(ONLINE_FILE)
+    active = normalize_online_entries(online.get(room_key(room), {}))
+    if config.get("is_locked") and not current_session_has_room_access(room):
+        return "Room sedang dikunci. Peserta baru tidak bisa masuk sampai pembuat membuka lock."
+    max_participants = int(config.get("max_participants", DEFAULT_MAX_PARTICIPANTS) or DEFAULT_MAX_PARTICIPANTS)
+    if sid not in active and len(active) >= max_participants and not room_creator_is_unlocked(room):
+        return f"Room sudah mencapai batas maksimal {max_participants} peserta aktif."
+    return ""
+
+
+def set_room_lock(room: str, locked: bool, actor: str = "") -> None:
+    config = get_room_config(room)
+    active = normalize_online_entries(load_json(ONLINE_FILE).get(room_key(room), {}))
+    session_ids = [str(sid) for sid in active.keys() if str(sid)]
+    current_sid = get_session_id()
+    if current_sid not in session_ids:
+        session_ids.append(current_sid)
+    config["is_locked"] = bool(locked)
+    config["locked_at"] = now_epoch() if locked else 0
+    config["locked_by_cipher"] = encrypt_text(str(actor or "pembuat")[:80]) if locked else ""
+    config["locked_session_ids"] = session_ids if locked else []
+    push_audit_event_to_config(
+        config,
+        "room_locked" if locked else "room_unlocked",
+        actor or "pembuat",
+        "Room dikunci untuk mencegah peserta baru masuk." if locked else "Room dibuka kembali untuk peserta baru.",
+    )
+    save_room_config(room, config)
+
+
+def update_room_max_participants(room: str, max_participants: int, actor: str = "") -> None:
+    config = get_room_config(room)
+    value = min(max(1, int(max_participants)), ROOM_MAX_PARTICIPANTS)
+    config["max_participants"] = value
+    push_audit_event_to_config(config, "max_participants_updated", actor or "pembuat", f"Batas peserta diubah menjadi {value}.")
+    save_room_config(room, config)
 
 
 def creator_password_digest(room: str, password: str) -> str:
@@ -1434,23 +1639,40 @@ def room_creator_is_unlocked(room: str) -> bool:
 
 
 def render_room_creator_unlock(room: str, context_key: str = "default") -> bool:
-    """Minta password pembuat sebelum aksi sensitif seperti revoke/hapus chat.
-    context_key membuat key Streamlit unik saat form muncul di beberapa menu.
-    """
+    """Minta PIN aksi pembuat sebelum aksi sensitif seperti lock/revoke/hapus chat."""
     if room_creator_is_unlocked(room):
         return True
     if not room_has_creator_password(room):
         st.warning("Aksi ini hanya tersedia untuk admin karena room lama ini belum punya password pembuat.")
         return False
-    st.info("Masukkan password pembuat room untuk revoke room atau hapus chat.")
+
     safe_context = hashlib.sha1(str(context_key).encode("utf-8")).hexdigest()[:10]
+    blocked = room_password_block_seconds(room)
+    if blocked > 0:
+        st.warning(f"Terlalu banyak percobaan salah. Coba lagi dalam {format_countdown(blocked)}.")
+        return False
+
+    if room_has_owner_pin(room):
+        st.info("Masukkan PIN aksi pembuat untuk fitur sensitif seperti lock room, pengaturan GMeet, revoke, dan hapus chat.")
+        owner_pin = st.text_input("PIN aksi pembuat", type="password", key=f"owner_pin_unlock::{safe_context}::{room_key(room)}")
+        if st.button("Unlock aksi pembuat", use_container_width=True, key=f"creator_unlock_btn::{safe_context}::{room_key(room)}"):
+            if remember_room_owner_pin(room, owner_pin):
+                st.success("Akses pembuat aktif untuk sesi ini.")
+                st.rerun()
+            else:
+                wait = room_password_block_seconds(room)
+                st.error(f"PIN aksi pembuat salah.{f' Coba lagi dalam {format_countdown(wait)}.' if wait else ''}")
+        return False
+
+    st.info("Room lama ini belum punya PIN aksi pembuat terpisah. Masukkan password room untuk aksi sensitif.")
     password = st.text_input("Password pembuat room", type="password", key=f"creator_password_unlock::{safe_context}::{room_key(room)}")
     if st.button("Unlock aksi pembuat", use_container_width=True, key=f"creator_unlock_btn::{safe_context}::{room_key(room)}"):
         if remember_room_password(room, password):
             st.success("Akses pembuat aktif dan key Fernet room sudah dibuka.")
             st.rerun()
         else:
-            st.error("Password pembuat salah.")
+            wait = room_password_block_seconds(room)
+            st.error(f"Password pembuat salah.{f' Coba lagi dalam {format_countdown(wait)}.' if wait else ''}")
     return False
 
 
@@ -1460,29 +1682,37 @@ def ensure_room_config(
     created_by: str = "",
     creator_password: str = "",
     *,
+    owner_action_pin: str = "",
     max_lifetime_minutes: int = ROOM_MAX_TTL_MINUTES,
+    max_participants: int = DEFAULT_MAX_PARTICIPANTS,
 ) -> dict[str, Any]:
     room = clean_room_name(room)
     settings = load_json(ROOM_SETTINGS_FILE)
     key = room_key(room)
     existing = settings.get(key)
     now = now_epoch()
+    clean_owner_pin = str(owner_action_pin or "").strip()
     if isinstance(existing, dict) and int(existing.get("expires_at", 0)) > now and not existing.get("destroyed_at"):
         config = get_room_config(room)
         if not config.get("room_cipher"):
             config["room_cipher"] = encrypt_text(room)
         if str(creator_password or "").strip() and not config.get("creator_password_hash"):
             config["creator_password_hash"] = creator_password_digest(room, creator_password)
+        if clean_owner_pin and not config.get("owner_action_hash"):
+            config["owner_action_hash"] = owner_pin_digest(room, clean_owner_pin)
         if str(creator_password or "").strip() and not config.get("room_fernet_salt"):
             config["room_fernet_salt"] = _b64encode(secrets.token_bytes(ROOM_SALT_BYTES))
             config["room_crypto_version"] = ROOM_CRYPTO_VERSION
         if str(creator_password or "").strip() and config.get("room_fernet_salt"):
             st.session_state[room_crypto_session_key(room)] = derive_room_fernet_key(room, creator_password, str(config.get("room_fernet_salt", ""))).decode("ascii")
             st.session_state[room_share_password_session_key(room)] = str(creator_password or "")
+        if clean_owner_pin:
+            st.session_state[room_creator_session_key(room)] = True
         settings[key] = config
         atomic_write_json(ROOM_SETTINGS_FILE, settings)
         return config
     lifetime_minutes = clamp_minutes(lifetime_minutes, max_lifetime_minutes)
+    safe_max_participants = min(max(1, int(max_participants or DEFAULT_MAX_PARTICIPANTS)), ROOM_MAX_PARTICIPANTS)
     config = {
         "room_key": key,
         "room_cipher": encrypt_text(room),
@@ -1493,15 +1723,26 @@ def ensure_room_config(
         "last_active_at": now,
         "destroyed_at": 0,
         "creator_password_hash": creator_password_digest(room, creator_password) if str(creator_password or "").strip() else "",
+        "owner_action_hash": owner_pin_digest(room, clean_owner_pin) if clean_owner_pin else "",
         "room_fernet_salt": _b64encode(secrets.token_bytes(ROOM_SALT_BYTES)) if str(creator_password or "").strip() else "",
         "room_crypto_version": ROOM_CRYPTO_VERSION if str(creator_password or "").strip() else 1,
         "video_call_provider": VIDEO_CALL_PROVIDER,
         "video_call_url_cipher": "",
         "video_session_note_cipher": encrypt_text(DEFAULT_VIDEO_SESSION_NOTE),
+        "video_call_visible": False,
+        "is_locked": False,
+        "locked_at": 0,
+        "locked_by_cipher": "",
+        "locked_session_ids": [],
+        "max_participants": safe_max_participants,
+        "audit_log": [],
     }
+    push_audit_event_to_config(config, "room_created", created_by or "anonymous", f"Room dibuat dengan durasi {lifetime_minutes} menit dan batas {safe_max_participants} peserta.")
     if str(creator_password or "").strip() and config.get("room_fernet_salt"):
         st.session_state[room_crypto_session_key(room)] = derive_room_fernet_key(room, creator_password, str(config.get("room_fernet_salt", ""))).decode("ascii")
         st.session_state[room_share_password_session_key(room)] = str(creator_password or "")
+    if clean_owner_pin:
+        st.session_state[room_creator_session_key(room)] = True
     settings[key] = config
     atomic_write_json(ROOM_SETTINGS_FILE, settings)
     return config
@@ -1530,23 +1771,31 @@ def decrypt_optional_config_text(cipher_text: str, fallback: str = "") -> str:
     return value
 
 
-def get_room_video_call(room: str) -> dict[str, str]:
+def get_room_video_call(room: str) -> dict[str, Any]:
     config = get_room_config(room)
     note = decrypt_optional_config_text(str(config.get("video_session_note_cipher", "") or ""), DEFAULT_VIDEO_SESSION_NOTE)
     return {
         "provider": str(config.get("video_call_provider", VIDEO_CALL_PROVIDER) or VIDEO_CALL_PROVIDER),
         "url": decrypt_optional_config_text(str(config.get("video_call_url_cipher", "") or ""), ""),
         "session_note": note or DEFAULT_VIDEO_SESSION_NOTE,
+        "visible": bool(config.get("video_call_visible", False)),
     }
 
 
-def save_room_video_call(room: str, url: str, session_note: str) -> None:
+def save_room_video_call(room: str, url: str, session_note: str, visible: bool = True, actor: str = "") -> None:
     config = get_room_config(room)
     clean_url = sanitize_gmeet_url(url)
     clean_note = str(session_note or DEFAULT_VIDEO_SESSION_NOTE).strip()[:240] or DEFAULT_VIDEO_SESSION_NOTE
     config["video_call_provider"] = VIDEO_CALL_PROVIDER
     config["video_call_url_cipher"] = encrypt_text(clean_url) if clean_url else ""
     config["video_session_note_cipher"] = encrypt_text(clean_note)
+    config["video_call_visible"] = bool(clean_url and visible)
+    push_audit_event_to_config(
+        config,
+        "video_call_updated" if clean_url else "video_call_removed",
+        actor or "pembuat",
+        "Info Google Meet diperbarui." if clean_url else "Link Google Meet dihapus.",
+    )
     save_room_config(room, config)
 
 
@@ -1888,9 +2137,12 @@ def update_checklist_item(room: str, message_id: str, index: int, checked: bool)
 
 
 def room_status_label(room: str, active_count: int) -> str:
+    config = get_room_config(room)
     left = room_seconds_left(room)
     if left <= 0:
         return "Revoked"
+    if config.get("is_locked"):
+        return "Locked"
     if left <= 300:
         return "Closing soon"
     if active_count > 0:
@@ -2030,12 +2282,22 @@ def create_room_with_invite(
     created_by: str = "",
     creator_password: str = "",
     *,
+    owner_action_pin: str = "",
     max_lifetime_minutes: int = ROOM_MAX_TTL_MINUTES,
     max_invite_ttl_minutes: int = INVITE_MAX_TTL_MINUTES,
+    max_participants: int = DEFAULT_MAX_PARTICIPANTS,
 ) -> str:
     room = clean_room_name(room)
     lifetime = clamp_minutes(lifetime_minutes, max_lifetime_minutes)
-    ensure_room_config(room, lifetime, created_by, creator_password, max_lifetime_minutes=max_lifetime_minutes)
+    ensure_room_config(
+        room,
+        lifetime,
+        created_by,
+        creator_password,
+        owner_action_pin=owner_action_pin,
+        max_lifetime_minutes=max_lifetime_minutes,
+        max_participants=max_participants,
+    )
     return create_invite(room, lifetime, created_by, max_invite_ttl_minutes)
 
 
@@ -2167,6 +2429,68 @@ def render_click_to_copy_invite_link(invite_url: str, input_key: str, label: str
         height=92,
     )
 
+def render_copy_text_block(text: str, input_key: str, label: str = "Copy text") -> None:
+    """Render a read-only textarea with a copy button for invitation templates or summaries."""
+    safe_label = html.escape(label)
+    safe_text = html.escape(str(text or ""), quote=True)
+    safe_id = "copy_text_" + hashlib.sha1(f"{input_key}:{time.time_ns()}".encode()).hexdigest()[:12]
+    components.html(
+        f"""
+        <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;width:100%;box-sizing:border-box;">
+          <div style="font-size:12px;font-weight:800;margin-bottom:6px;opacity:.86;">{safe_label}</div>
+          <textarea id="{safe_id}_input" readonly style="
+            width:100%;min-height:116px;box-sizing:border-box;resize:vertical;cursor:pointer;
+            border-radius:14px;border:1px solid rgba(120,145,180,.42);
+            background:rgba(255,255,255,.08);color:inherit;padding:10px 12px;
+            font-size:13px;line-height:1.45;outline:none;">{safe_text}</textarea>
+          <button id="{safe_id}_btn" type="button" style="
+            margin-top:8px;cursor:pointer;border-radius:999px;border:1px solid rgba(120,145,180,.42);
+            background:rgba(255,255,255,.14);color:inherit;padding:9px 13px;font-weight:800;">Copy template</button>
+          <span id="{safe_id}_status" style="font-size:11px;margin-left:8px;opacity:.74;">Klik tombol untuk menyalin.</span>
+        </div>
+        <script>
+        (function(){{
+          const text = {json.dumps(str(text or ""))};
+          const input = document.getElementById('{safe_id}_input');
+          const btn = document.getElementById('{safe_id}_btn');
+          const status = document.getElementById('{safe_id}_status');
+          async function copyText(){{
+            try {{
+              if (navigator.clipboard && window.isSecureContext) await navigator.clipboard.writeText(text);
+              else {{ input.select(); document.execCommand('copy'); }}
+              if (input) input.select();
+              if (status) status.textContent = 'Tersalin.';
+            }} catch(e) {{
+              if (input) input.select();
+              if (status) status.textContent = 'Gagal auto-copy. Tekan Ctrl/Cmd+C.';
+            }}
+          }}
+          if (btn) btn.addEventListener('click', copyText);
+          if (input) input.addEventListener('click', () => input.select());
+        }})();
+        </script>
+        """,
+        height=190,
+    )
+
+
+def build_invite_template(invite_url: str, room: str | None = None, password: str | None = None) -> str:
+    room_label = f" untuk room {room}" if room else ""
+    password_line = f"Password room: {password}" if str(password or "").strip() else "Password room: minta ke pembuat room secara terpisah."
+    return (
+        f"Halo, sesi akan dilakukan melalui AntiTrust{room_label}.\n\n"
+        f"Link masuk room:\n{invite_url}\n\n"
+        f"{password_line}\n"
+        "Waktu sesi mengikuti countdown di room/chat.\n"
+        "Jika ada video call, tombol Google Meet tersedia di Panel room → Video Call setelah masuk.\n\n"
+        "Catatan keamanan: jangan teruskan link/password ke orang lain dan hapus pesan ini setelah berhasil masuk."
+    )
+
+
+def render_invite_template(invite_url: str, room: str | None = None, password: str | None = None, input_key: str = "invite_template") -> None:
+    with st.expander("Template undangan", expanded=False):
+        render_copy_text_block(build_invite_template(invite_url, room, password), input_key=input_key, label="Template undangan siap kirim")
+
 
 def render_temporary_invite_link(
     *,
@@ -2196,6 +2520,8 @@ def render_temporary_invite_link(
             keys.append(room_key)
         if password_key:
             keys.append(password_key)
+        if url_key == "public_invite_url":
+            keys.append("public_owner_pin")
         clear_invite_display(*keys)
         try:
             st.query_params.clear()
@@ -2211,6 +2537,8 @@ def render_temporary_invite_link(
             keys.append(room_key)
         if password_key:
             keys.append(password_key)
+        if url_key == "public_invite_url":
+            keys.append("public_owner_pin")
         clear_invite_display(*keys)
         st.toast("Invite link sudah habis sesuai durasi aslinya.")
         st.rerun()
@@ -2219,6 +2547,7 @@ def render_temporary_invite_link(
     share_password = st.session_state.get(password_key) if password_key else None
     render_click_to_copy_invite_link(invite_url, input_key)
     render_whatsapp_share(invite_url, room_name, share_password)
+    render_invite_template(invite_url, room_name, share_password, input_key=f"template::{input_key}")
     with st.expander("QR Invite", expanded=False):
         render_qr_invite(invite_url)
     render_countdown(label, display_left)
@@ -2269,6 +2598,7 @@ def render_expiring_invite_link(
     share_password = password if password is not None else (st.session_state.get(password_key) if password_key else None)
     render_click_to_copy_invite_link(invite_url, input_key)
     render_whatsapp_share(invite_url, room_name, share_password)
+    render_invite_template(invite_url, room_name, share_password, input_key=f"template::{input_key}")
     with st.expander("QR Invite", expanded=False):
         render_qr_invite(invite_url)
     render_countdown(label, left)
@@ -2946,20 +3276,30 @@ def render_public_room_creator() -> None:
     st.markdown('<div class="terminal-card">', unsafe_allow_html=True)
     st.markdown('<div class="terminal-note">$ create_room --anonymous --random --temporary-link</div>', unsafe_allow_html=True)
     st.subheader("Buat room")
-    st.caption("Nama room dibuat otomatis dan acak. Buat password untuk kunci ruangan. Share link yang dibuat dengan klik share via Whatsapp, dan hapus setelahnya")
-    creator_password = st.text_input("Password pembuat room (min 8 karakter)", type="password", help="Password ini dipakai untuk membuka enkripsi room, revoke room, dan hapus chat. Bagikan secara terpisah dari link.", key="public_creator_room_password")
+    st.caption("Nama room dibuat otomatis dan acak. Password room membuka enkripsi/chat; PIN aksi pembuat dipakai untuk lock, GMeet, revoke, dan pengaturan sensitif.")
+    creator_password = st.text_input("Password room / enkripsi (min 8 karakter)", type="password", help="Bagikan ke peserta yang dipercaya agar mereka bisa membuka room. Jangan samakan dengan PIN aksi pembuat jika ingin kontrol lebih aman.", key="public_creator_room_password")
+    owner_pin_input = st.text_input("PIN aksi pembuat (opsional, min 6 karakter)", type="password", help="Kosongkan untuk dibuat otomatis. PIN ini jangan dibagikan ke peserta biasa.", key="public_owner_pin_input")
     ttl = st.slider("Durasi room", min_value=1, max_value=ROOM_MAX_TTL_MINUTES, value=ROOM_DEFAULT_TTL_MINUTES, help="Maksimal 60 menit. Tampilan link hilang otomatis setelah 1 menit, tanpa revoke.", key="public_room_ttl")
+    max_participants = st.slider("Maksimal peserta aktif", min_value=1, max_value=ROOM_MAX_PARTICIPANTS, value=DEFAULT_MAX_PARTICIPANTS, help="Peserta baru ditolak jika room sudah mencapai batas ini.", key="public_room_max_participants")
     if st.button("Create random room + link", use_container_width=True):
         if len(str(creator_password or "").strip()) < 8:
-            st.warning("Password pembuat room minimal 8 karakter agar key Fernet lebih kuat.")
+            st.warning("Password room minimal 8 karakter agar key Fernet lebih kuat.")
             st.markdown('</div>', unsafe_allow_html=True)
             return
+        clean_owner_pin = str(owner_pin_input or "").strip()
+        if clean_owner_pin and len(clean_owner_pin) < 6:
+            st.warning("PIN aksi pembuat minimal 6 karakter, atau kosongkan agar dibuat otomatis.")
+            st.markdown('</div>', unsafe_allow_html=True)
+            return
+        owner_pin = clean_owner_pin or generate_owner_pin()
         room = generate_random_room_name("anon")
-        token = create_room_with_invite(room, int(ttl), "anonymous", creator_password)
+        token = create_room_with_invite(room, int(ttl), "anonymous", creator_password, owner_action_pin=owner_pin, max_participants=int(max_participants))
+        st.session_state[room_creator_session_key(room)] = True
         st.session_state["public_invite_url"] = build_invite_url(token)
         st.session_state["public_invite_token"] = token
         st.session_state["public_room"] = room
         st.session_state["public_room_share_password"] = str(creator_password or "")
+        st.session_state["public_owner_pin"] = owner_pin
         st.session_state["public_invite_display_until"] = now_epoch() + 60
         st.success(f"Room otomatis `{room}` berhasil dibuat. Link hanya ditampilkan 1 menit, tanpa revoke.")
     if st.session_state.get("public_invite_url"):
@@ -2974,6 +3314,10 @@ def render_public_room_creator() -> None:
                 label="Link hilang dari halaman dalam",
                 password_key="public_room_share_password",
             )
+            owner_pin = st.session_state.get("public_owner_pin")
+            if owner_pin:
+                st.warning("Simpan PIN aksi pembuat ini. PIN tidak ikut dikirim di template/WhatsApp dan akan disembunyikan bersama tampilan link.")
+                st.code(str(owner_pin), language="text")
         with col2:
             render_countdown("Sisa waktu room", room_seconds_left(st.session_state.get("public_room")))
     st.markdown('</div>', unsafe_allow_html=True)
@@ -3042,6 +3386,10 @@ def render_mobile_message_focus() -> None:
 def render_room_invite_panel(room: str, username: str) -> None:
     with st.expander("Invite", expanded=False):
         room_left = room_seconds_left(room)
+        config = get_room_config(room)
+        if config.get("is_locked") and not room_creator_is_unlocked(room):
+            st.warning("Room sedang dikunci. Pembuatan invite baru ditutup untuk peserta biasa.")
+            return
 
         # Saat room hampir habis/berakhir, jangan render slider.
         # Streamlit slider akan error bila state lama lebih besar dari max_value baru
@@ -3109,16 +3457,21 @@ def clear_destroy_countdown() -> None:
 
 def render_video_call_panel(room: str, username: str) -> None:
     data = get_room_video_call(room)
-    current_url = data.get("url", "")
-    current_note = data.get("session_note", DEFAULT_VIDEO_SESSION_NOTE)
+    current_url = str(data.get("url", "") or "")
+    current_note = str(data.get("session_note", DEFAULT_VIDEO_SESSION_NOTE) or DEFAULT_VIDEO_SESSION_NOTE)
+    current_visible = bool(data.get("visible", False))
 
     st.markdown("**Google Meet**")
     st.caption("Koneksi video call bisa menggunakan Google Meet. Sesi mengikuti waktu chat/room aktif, jadi patokannya adalah countdown room.")
 
-    if current_url:
-        st.success("Link Google Meet aktif untuk room ini.")
+    if current_url and current_visible and not room_is_expired(room):
+        st.success("Link Google Meet aktif dan terlihat oleh peserta.")
         st.link_button("Buka Google Meet", current_url, use_container_width=True)
         st.caption(current_note)
+    elif current_url:
+        st.warning("Link Google Meet sudah disimpan, tetapi belum ditampilkan ke peserta. Pembuat bisa menekan Mulai/Tampilkan Video Call.")
+        if room_creator_is_unlocked(room):
+            st.link_button("Buka Google Meet sebagai pembuat", current_url, use_container_width=True)
     else:
         st.info("Belum ada link Google Meet. Pembuat room bisa menambahkan link agar peserta langsung join dari panel ini.")
 
@@ -3128,18 +3481,23 @@ def render_video_call_panel(room: str, username: str) -> None:
     with st.form(f"video_call_form::{room_key(room)}"):
         meet_url = st.text_input("Link Google Meet", value=current_url, placeholder="https://meet.google.com/abc-defg-hij")
         note = st.text_area("Catatan sesi", value=current_note, max_chars=240, height=76)
+        visible = st.checkbox("Tampilkan tombol Join ke peserta", value=current_visible, help="Matikan jika link belum siap atau sesi belum dimulai.")
         save_clicked = st.form_submit_button("Simpan info video call", use_container_width=True)
     if save_clicked:
         clean_url = sanitize_gmeet_url(meet_url)
         if meet_url.strip() and not clean_url:
             st.warning("Masukkan link Google Meet yang valid, contoh: https://meet.google.com/abc-defg-hij")
             return
-        save_room_video_call(room, clean_url, note)
+        save_room_video_call(room, clean_url, note, visible=visible, actor=username)
         st.success("Info Google Meet disimpan.")
         st.rerun()
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
+        if st.button("Mulai/Tampilkan", use_container_width=True, disabled=not bool(current_url), key=f"show_meet_info::{room_key(room)}"):
+            save_room_video_call(room, current_url, current_note, visible=True, actor=username)
+            st.rerun()
+    with col2:
         if st.button("Kirim info ke chat", use_container_width=True, disabled=not bool(current_url), key=f"post_meet_info::{room_key(room)}"):
             text = (
                 "Untuk koneksi video call bisa menggunakan Google Meet. "
@@ -3148,10 +3506,11 @@ def render_video_call_panel(room: str, username: str) -> None:
             )
             if not rate_limited("video_call_info"):
                 append_text(room, username, text, 0)
+                append_audit_event(room, "video_call_posted", username, "Info Google Meet dikirim ke chat.")
                 st.rerun()
-    with col2:
-        if st.button("Hapus link GMeet", use_container_width=True, disabled=not bool(current_url), key=f"clear_meet_info::{room_key(room)}"):
-            save_room_video_call(room, "", DEFAULT_VIDEO_SESSION_NOTE)
+    with col3:
+        if st.button("Hapus GMeet", use_container_width=True, disabled=not bool(current_url), key=f"clear_meet_info::{room_key(room)}"):
+            save_room_video_call(room, "", DEFAULT_VIDEO_SESSION_NOTE, visible=False, actor=username)
             st.success("Link Google Meet dihapus dari room.")
             st.rerun()
 
@@ -3204,11 +3563,147 @@ def render_room_settings(room: str) -> None:
     current = choice_from_minutes(config.get("auto_destroy_minutes"))
     with st.expander("Pengaturan"):
         st.caption("Opsional: percepat destroy jika room kosong.")
+        if not render_room_creator_unlock(room, "room_settings"):
+            return
         choice = st.selectbox("Auto-destroy jika room kosong", AUTO_DESTROY_CHOICES, index=AUTO_DESTROY_CHOICES.index(current) if current in AUTO_DESTROY_CHOICES else 3)
         if st.button("Simpan pengaturan", use_container_width=True):
             config["auto_destroy_minutes"] = parse_destroy_choice(choice)
+            push_audit_event_to_config(config, "auto_destroy_updated", "pembuat", f"Auto-destroy diubah menjadi {choice}.")
             save_room_config(room, config)
             st.success("Pengaturan disimpan.")
+
+def render_room_access_control(room: str, username: str) -> None:
+    config = get_room_config(room)
+    st.markdown("**Kontrol akses room**")
+    locked = bool(config.get("is_locked"))
+    max_participants = int(config.get("max_participants", DEFAULT_MAX_PARTICIPANTS) or DEFAULT_MAX_PARTICIPANTS)
+    active_count = active_session_count(room)
+    st.caption(f"Status: {'terkunci' if locked else 'terbuka'} · peserta aktif {active_count}/{max_participants}")
+
+    if not render_room_creator_unlock(room, "access_control"):
+        return
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if locked:
+            if st.button("Unlock room", use_container_width=True, key=f"unlock_room::{room_key(room)}"):
+                set_room_lock(room, False, username)
+                st.success("Room dibuka kembali untuk peserta baru.")
+                st.rerun()
+        else:
+            if st.button("Lock room", use_container_width=True, key=f"lock_room::{room_key(room)}"):
+                set_room_lock(room, True, username)
+                st.success("Room dikunci. Peserta baru tidak bisa masuk.")
+                st.rerun()
+    with col2:
+        new_limit = st.number_input("Maks peserta", min_value=1, max_value=ROOM_MAX_PARTICIPANTS, value=max_participants, step=1, key=f"max_participants::{room_key(room)}")
+        if st.button("Simpan limit", use_container_width=True, key=f"save_max_participants::{room_key(room)}"):
+            update_room_max_participants(room, int(new_limit), username)
+            st.success("Limit peserta diperbarui.")
+            st.rerun()
+
+
+def render_participant_panel(room: str, current_username: str) -> None:
+    entries = get_room_online_entries(room)
+    config = get_room_config(room)
+    st.markdown("**Peserta aktif**")
+    st.caption(f"{len(entries)}/{config.get('max_participants', DEFAULT_MAX_PARTICIPANTS)} peserta aktif · timeout online sekitar {ONLINE_ACTIVE_SECONDS} detik")
+    if not entries:
+        st.info("Belum ada peserta aktif.")
+        return
+    for entry in entries:
+        name = normalize_display_name(entry.get("username", "")) or "unknown"
+        me = " · kamu" if entry.get("is_me") or canonical_display_name(name) == canonical_display_name(current_username) else ""
+        st.markdown(f"- **{html.escape(name)}**{me} · terakhir aktif {int(entry.get('seconds_ago', 0))} detik lalu", unsafe_allow_html=True)
+
+
+def render_audit_log(room: str) -> None:
+    events = list(reversed(get_room_audit_events(room)[-20:]))
+    with st.expander("Audit ringan", expanded=False):
+        st.caption("Log ini mencatat event keamanan tanpa menyimpan isi pesan chat.")
+        if not events:
+            st.caption("Belum ada event audit.")
+            return
+        for event in events:
+            actor = f" · {event.get('actor')}" if event.get("actor") else ""
+            detail = f" — {event.get('detail')}" if event.get("detail") else ""
+            st.caption(f"{event.get('time','')} · {event.get('event','event')}{actor}{detail}")
+
+
+def build_session_summary(room: str, messages: list[dict[str, Any]], username: str = "") -> str:
+    config = get_room_config(room)
+    video = get_room_video_call(room)
+    counts: dict[str, int] = {}
+    for msg in messages:
+        msg_type = str(msg.get("type", "text"))
+        counts[msg_type] = counts.get(msg_type, 0) + 1
+    lines = [
+        f"# Ringkasan sesi AntiTrust",
+        "",
+        f"Room dibuat: {datetime.fromtimestamp(int(config.get('created_at', now_epoch())), WIB).strftime('%Y-%m-%d %H:%M:%S WIB')}",
+        f"Sisa waktu saat ringkasan dibuat: {format_room_time_left(room_seconds_left(room))}",
+        f"Dibuat oleh: {username or 'user'}",
+        f"Status lock: {'terkunci' if config.get('is_locked') else 'terbuka'}",
+        f"Batas peserta: {config.get('max_participants', DEFAULT_MAX_PARTICIPANTS)}",
+        f"Google Meet: {'aktif/terlihat' if video.get('url') and video.get('visible') else ('tersimpan tapi tersembunyi' if video.get('url') else 'belum diset')}",
+        "",
+        "## Statistik pesan",
+    ]
+    if counts:
+        for key, value in sorted(counts.items()):
+            lines.append(f"- {key}: {value}")
+    else:
+        lines.append("- Belum ada pesan.")
+
+    pinned_id = str(config.get("pinned_message_id", "") or "")
+    if pinned_id:
+        pinned = next((m for m in messages if str(m.get("id")) == pinned_id), None)
+        if pinned:
+            lines += ["", "## Pesan pin", f"- {message_summary(pinned, room)}"]
+
+    checklists = [m for m in messages if str(m.get("type")) == "checklist"]
+    if checklists:
+        lines += ["", "## Checklist"]
+        for msg in checklists[-5:]:
+            title = decrypt_room_text(room, str(msg.get("title", "Checklist")))
+            items = msg.get("items") if isinstance(msg.get("items"), list) else []
+            checked = msg.get("checked") if isinstance(msg.get("checked"), dict) else {}
+            done = sum(1 for i in range(len(items)) if checked.get(str(i)))
+            lines.append(f"- {title}: {done}/{len(items)} selesai")
+
+    polls = [m for m in messages if str(m.get("type")) == "poll"]
+    if polls:
+        lines += ["", "## Poll"]
+        for msg in polls[-5:]:
+            question = decrypt_room_text(room, str(msg.get("question", "Poll")))
+            votes = msg.get("votes") if isinstance(msg.get("votes"), dict) else {}
+            options = [decrypt_room_text(room, str(x)) for x in msg.get("options", []) if isinstance(x, str)]
+            result = ", ".join(f"{opt}: {sum(1 for v in votes.values() if v == opt)}" for opt in options)
+            lines.append(f"- {question}: {result}")
+
+    recent_texts = [m for m in messages if str(m.get("type")) == "text"][-8:]
+    if recent_texts:
+        lines += ["", "## Pesan teks terbaru"]
+        for msg in recent_texts:
+            sender = normalize_display_name(msg.get("username", "unknown")) or "unknown"
+            text = decrypt_room_text(room, str(msg.get("text", ""))).replace("\n", " ")[:240]
+            lines.append(f"- {msg.get('time','')} · {sender}: {text}")
+
+    lines += ["", "Catatan: ringkasan ini dibuat lokal dari pesan yang masih tersedia di room. Pesan one-time yang sudah dibuka/hapus tidak bisa diringkas."]
+    return "\n".join(lines)
+
+
+def render_session_summary(room: str, username: str, messages: list[dict[str, Any]]) -> None:
+    st.markdown("**Ringkasan sesi**")
+    summary = build_session_summary(room, messages, username)
+    st.text_area("Preview ringkasan", value=summary, height=220, key=f"summary_preview::{room_key(room)}")
+    st.download_button(
+        "Download summary .md",
+        data=summary.encode("utf-8"),
+        file_name=f"antitrust_summary_{slug(room)}_{datetime.now(WIB).strftime('%Y%m%d_%H%M')}.md",
+        mime="text/markdown",
+        use_container_width=True,
+    )
 
 
 def render_panic(room: str) -> None:
@@ -3260,7 +3755,7 @@ def render_pinned_message(room: str, messages: list[dict[str, Any]]) -> None:
 
 def render_feature_panel(room: str, username: str, messages: list[dict[str, Any]]) -> None:
     with st.expander("Fitur", expanded=False):
-        tab_secret, tab_poll, tab_check, tab_react, tab_pin = st.tabs(["Secret", "Poll", "Checklist", "React", "Pin"])
+        tab_secret, tab_poll, tab_check, tab_react, tab_pin, tab_summary = st.tabs(["Secret", "Poll", "Checklist", "React", "Pin", "Summary"])
         with tab_secret:
             secret_messages = [m for m in messages if str(m.get("type")) in {"secret_note", "one_time"}]
             if not secret_messages:
@@ -3334,11 +3829,15 @@ def render_feature_panel(room: str, username: str, messages: list[dict[str, Any]
                 with col_a:
                     if st.button("Pin", use_container_width=True, key="pin_btn"):
                         set_pinned_message(room, selected_pin)
+                        append_audit_event(room, "message_pinned", username, "Pesan penting dipin.")
                         st.rerun()
                 with col_b:
                     if st.button("Unpin", use_container_width=True, key="unpin_btn"):
                         set_pinned_message(room, "")
+                        append_audit_event(room, "message_unpinned", username, "Pin pesan dilepas.")
                         st.rerun()
+        with tab_summary:
+            render_session_summary(room, username, messages)
 
 
 def render_message_form(room: str, username: str) -> None:
@@ -3549,23 +4048,27 @@ def render_online_users(entries: list[dict[str, Any]], current_username: str) ->
 
 def render_compact_room_panel(room: str, username: str, messages: list[dict[str, Any]]) -> None:
     with st.expander("Panel room", expanded=False):
-        tab_invite, tab_video, tab_features, tab_files, tab_security = st.tabs(["| Invite |", "| Video Call |", "| Fitur |", "| File |", "| Aksi |"])
+        tab_invite, tab_video, tab_participants, tab_features, tab_files, tab_security = st.tabs(["| Invite |", "| Video Call |", "| Peserta |", "| Fitur |", "| File |", "| Aksi |"])
         with tab_invite:
             render_room_invite_panel(room, username)
         with tab_video:
             render_video_call_panel(room, username)
+        with tab_participants:
+            render_participant_panel(room, username)
         with tab_features:
             render_feature_panel(room, username, messages)
         with tab_files:
             render_packet_viewer(room, messages)
         with tab_security:
+            render_room_access_control(room, username)
+            render_audit_log(room)
             render_room_actions(room, username)
             render_room_settings(room)
             render_panic(room)
 
 
 def render_room_password_unlock(room: str) -> bool:
-    """Wajibkan password pembuat room untuk membuka Fernet key room.
+    """Wajibkan password room untuk membuka Fernet key room.
 
     Room lama tanpa room_fernet_salt tetap bisa dipakai tanpa langkah ini.
     """
@@ -3578,9 +4081,14 @@ def render_room_password_unlock(room: str) -> bool:
     st.markdown('<div class="terminal-card">', unsafe_allow_html=True)
     st.markdown('<div class="terminal-note">$ unlock_room_key --password-derived-fernet</div>', unsafe_allow_html=True)
     st.subheader("Unlock enkripsi room")
-    st.caption("Room ini memakai Fernet key unik yang diturunkan dari Password pembuat room. Masukkan password yang diberikan, jika gagal copy paste, silahkan ketikkan manual.")
+    st.caption("Masukkan password room yang diberikan pembuat. Password ini membuka isi room, bukan otomatis membuka aksi pembuat pada room baru.")
+    blocked = room_password_block_seconds(room)
+    if blocked > 0:
+        st.warning(f"Terlalu banyak percobaan salah. Coba lagi dalam {format_countdown(blocked)}.")
+        st.markdown('</div>', unsafe_allow_html=True)
+        return False
     with st.form(f"room_crypto_unlock::{room_key(room)}"):
-        password = st.text_input("Masukkan Password yang diberikan (Perhatikan huruf besar dan kecil)", type="password")
+        password = st.text_input("Password room", type="password")
         submitted = st.form_submit_button("Unlock room", use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
     if not submitted:
@@ -3589,7 +4097,20 @@ def render_room_password_unlock(room: str) -> bool:
         st.success("Room berhasil dibuka. Key Fernet unik aktif untuk sesi ini.")
         st.rerun()
         return True
-    st.error("Password pembuat room salah atau key tidak cocok.")
+    wait = room_password_block_seconds(room)
+    st.error(f"Password room salah atau key tidak cocok.{f' Coba lagi dalam {format_countdown(wait)}.' if wait else ''}")
+    return False
+
+def render_room_join_gate(room: str) -> bool:
+    reason = room_join_block_reason(room)
+    if not reason:
+        return True
+    st.markdown('<div class="terminal-card">', unsafe_allow_html=True)
+    st.warning(reason)
+    st.caption("Peserta yang sudah berada di room tetap bisa melanjutkan selama sesi browsernya aktif. Pembuat dapat membuka lock atau menaikkan limit dari perangkat yang sudah memiliki akses.")
+    if room_has_owner_pin(room):
+        render_room_creator_unlock(room, "join_gate")
+    st.markdown('</div>', unsafe_allow_html=True)
     return False
 
 
@@ -3661,6 +4182,8 @@ def main() -> None:
     render_invite_expiry_redirect(current_invite_left)
     if not render_room_password_unlock(room):
         return
+    if not render_room_join_gate(room):
+        return
     # Jangan auto-refresh tiap detik; countdown berjalan di browser agar halaman tidak naik sendiri.
     username = get_locked_username(is_admin=bool(st.session_state.get("admin_ok")))
     if not username:
@@ -3690,7 +4213,7 @@ def main() -> None:
     )
     render_online_users(online_entries, username)
     video_call = get_room_video_call(room)
-    if video_call.get("url"):
+    if video_call.get("url") and video_call.get("visible") and not room_is_expired(room):
         with st.container(border=True):
             st.markdown("**Video call:** Google Meet")
             st.caption(video_call.get("session_note", DEFAULT_VIDEO_SESSION_NOTE))
