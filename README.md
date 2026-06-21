@@ -18,6 +18,17 @@ AntiTrust adalah private temporary chat berbasis Streamlit. Paket ini sudah dipe
 - **Validasi upload lebih ketat**: file dibatasi ukuran dan tipe; script/executable diblokir; dokumen dicek berdasarkan signature/struktur file.
 - **Batas percobaan password/PIN**: setelah beberapa percobaan salah, sesi diberi jeda sementara.
 
+
+## Pembaruan desain responsif
+
+- **Layout wide untuk desktop**: halaman utama memakai ruang layar lebih luas sehingga chat, panel kontrol, dan status room tidak terasa sempit.
+- **Tampilan mobile lebih ramah HP**: tab bisa digeser horizontal, tombol lebih besar, input minimal 16px agar tidak memicu zoom di browser HP, dan kartu status disusun otomatis.
+- **Landing page lebih jelas**: pengguna melihat alur 3 langkah: buat room, bagikan undangan, lalu jalankan sesi.
+- **Pusat kontrol room terbuka otomatis**: invite, Google Meet, peserta, fitur, file, dan keamanan berada di satu area yang mudah ditemukan.
+- **Dashboard status room**: sisa waktu, status lock, jumlah peserta, dan status Google Meet tampil sebagai kartu ringkas.
+- **Chat bubble lebih modern**: pesan lebih mudah dibaca, bubble lebih rapi, dan gaya terminal lama diringankan agar nyaman untuk sesi panjang.
+- **Label Bahasa Indonesia lebih natural**: tombol dan tab diganti menjadi teks yang mudah dipahami pengguna non-teknis.
+
 ## Cara menjalankan
 
 ```bash
@@ -34,8 +45,8 @@ Gunakan `app.py` di folder utama paket ini.
 3. Isi **PIN aksi pembuat** atau kosongkan agar aplikasi membuat PIN otomatis.
 4. Simpan PIN aksi pembuat. PIN ini tidak ikut dibagikan di WhatsApp/template undangan.
 5. Kirim invite link dan password room hanya ke peserta yang dipercaya.
-6. Setelah semua peserta masuk, buka **Panel room → Aksi → Kontrol akses room → Lock room**.
-7. Untuk video call, buka **Panel room → Video Call**, simpan link Google Meet, lalu klik **Mulai/Tampilkan** saat sesi dimulai.
+6. Setelah semua peserta masuk, buka **Pusat kontrol room → Keamanan → Kontrol akses room → Lock room**.
+7. Untuk video call, buka **Pusat kontrol room → Video**, simpan link Google Meet, lalu klik **Mulai/Tampilkan** saat sesi dimulai.
 
 ## Secrets yang disarankan
 
@@ -69,5 +80,5 @@ PY
 > Link masuk room: `[invite-link]`  
 > Password room: minta ke pembuat room secara terpisah.  
 > Waktu sesi mengikuti countdown di room/chat.  
-> Jika ada video call, tombol Google Meet tersedia di Panel room → Video Call setelah masuk.  
+> Jika ada video call, tombol Google Meet tersedia di Pusat kontrol room → Video setelah masuk.  
 > Jangan teruskan link/password ke orang lain dan hapus pesan ini setelah berhasil masuk.

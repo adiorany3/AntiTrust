@@ -611,6 +611,332 @@ iframe[title="st.iframe"]{display:block!important;}
 </style>
 """
 
+UI_ENHANCEMENT_CSS = """
+<style>
+:root{
+  color-scheme: dark;
+  --ui-bg:#07110d;
+  --ui-surface:rgba(13,25,20,.92);
+  --ui-surface-2:rgba(20,35,29,.88);
+  --ui-card:rgba(18,31,26,.88);
+  --ui-card-hover:rgba(25,43,36,.95);
+  --ui-border:rgba(126,231,166,.24);
+  --ui-border-strong:rgba(126,231,166,.48);
+  --ui-accent:#3ee98f;
+  --ui-accent-2:#7dd3fc;
+  --ui-warning:#facc15;
+  --ui-danger:#fb7185;
+  --ui-text:#ecfff4;
+  --ui-muted:#a8d8bd;
+  --ui-soft:#13241d;
+  --ui-shadow:0 18px 55px rgba(0,0,0,.32);
+  --ui-font:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;
+}
+
+/* Modern readable shell: tetap gelap dan secure, tapi lebih nyaman dibaca di desktop & HP */
+html,body,.stApp,.stMarkdown,p,span,label,div,[data-testid="stWidgetLabel"],[data-testid="stMarkdownContainer"]{
+  font-family:var(--ui-font)!important;
+  letter-spacing:0!important;
+}
+h1,h2,h3,h4,h5,h6{
+  font-family:var(--ui-font)!important;
+  letter-spacing:-.035em!important;
+  text-shadow:none!important;
+}
+.stApp{
+  background:
+    radial-gradient(circle at top left, rgba(62,233,143,.16), transparent 32%),
+    radial-gradient(circle at top right, rgba(125,211,252,.12), transparent 30%),
+    linear-gradient(180deg,#07110d 0%,#08130f 48%,#040807 100%)!important;
+  overflow:auto!important;
+}
+.stApp::before{
+  opacity:.20!important;
+  animation:none!important;
+  background:
+    linear-gradient(rgba(126,231,166,.10) 1px, transparent 1px),
+    linear-gradient(90deg,rgba(126,231,166,.07) 1px, transparent 1px)!important;
+  background-size:64px 64px!important;
+}
+.stApp::after{display:none!important;}
+.block-container{
+  max-width:1120px!important;
+  padding:1.25rem 1rem 1.2rem!important;
+}
+[data-testid="stVerticalBlock"]{gap:.68rem!important;}
+[data-testid="stHorizontalBlock"]{gap:.68rem!important;}
+
+/* Sidebar lebih bersih */
+[data-testid="stSidebar"]{
+  background:linear-gradient(180deg,rgba(12,24,19,.98),rgba(5,10,8,.98))!important;
+  border-right:1px solid var(--ui-border)!important;
+  box-shadow:8px 0 28px rgba(0,0,0,.22)!important;
+}
+[data-testid="stSidebar"] *{font-family:var(--ui-font)!important;}
+[data-testid="stSidebar"] h1,[data-testid="stSidebar"] h2,[data-testid="stSidebar"] h3{color:var(--ui-text)!important;}
+
+/* Landing / hero */
+.hero,.terminal-hero{
+  border:1px solid var(--ui-border)!important;
+  border-radius:24px!important;
+  padding:22px 24px!important;
+  margin:6px 0 14px!important;
+  background:
+    radial-gradient(circle at 8% 0%, rgba(62,233,143,.20), transparent 38%),
+    radial-gradient(circle at 86% 16%, rgba(125,211,252,.15), transparent 35%),
+    linear-gradient(135deg,rgba(20,38,31,.96),rgba(9,17,14,.94))!important;
+  box-shadow:var(--ui-shadow)!important;
+}
+.hero::before,.terminal-hero::before,.hero::after,.terminal-hero::after{display:none!important;}
+.terminal-kicker{
+  font-family:var(--ui-font)!important;
+  color:var(--ui-accent-2)!important;
+  font-size:.76rem!important;
+  letter-spacing:.06em!important;
+  text-shadow:none!important;
+}
+.hero h1,.terminal-hero h1{
+  font-size:clamp(1.7rem,4vw,3rem)!important;
+  color:var(--ui-text)!important;
+  text-shadow:none!important;
+}
+.hero .muted,.terminal-hero .muted,.muted{
+  color:var(--ui-muted)!important;
+  font-size:.92rem!important;
+  line-height:1.55!important;
+}
+.terminal-cursor{
+  width:7px!important;
+  background:var(--ui-accent)!important;
+  box-shadow:0 0 18px rgba(62,233,143,.55)!important;
+}
+.badge{
+  background:rgba(62,233,143,.12)!important;
+  border:1px solid rgba(62,233,143,.28)!important;
+  color:var(--ui-accent)!important;
+  border-radius:999px!important;
+  text-transform:none!important;
+  letter-spacing:0!important;
+  padding:5px 10px!important;
+}
+
+/* Kartu, expander, dan kontainer */
+.card,.terminal-card,.danger-box,[data-testid="stExpander"],div[data-testid="stVerticalBlockBorderWrapper"]{
+  border-radius:18px!important;
+  border:1px solid var(--ui-border)!important;
+  background:linear-gradient(180deg,var(--ui-surface),rgba(11,20,17,.92))!important;
+  box-shadow:0 14px 42px rgba(0,0,0,.24), inset 0 1px 0 rgba(255,255,255,.04)!important;
+}
+.terminal-card{padding:18px!important;margin-top:0!important;}
+.terminal-note{
+  color:var(--ui-accent-2)!important;
+  font-family:var(--ui-font)!important;
+  text-shadow:none!important;
+  font-size:.80rem!important;
+}
+.danger-box{
+  background:linear-gradient(180deg,rgba(69,10,10,.78),rgba(27,6,6,.82))!important;
+  border-color:rgba(251,113,133,.42)!important;
+}
+[data-testid="stExpander"] summary{
+  color:var(--ui-text)!important;
+  font-family:var(--ui-font)!important;
+  text-shadow:none!important;
+  font-weight:800!important;
+}
+
+/* Komponen khusus yang dipakai app */
+.landing-grid{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:12px;
+  margin:0 0 14px;
+}
+.feature-card,.status-card,.quick-action-card{
+  border:1px solid var(--ui-border);
+  border-radius:18px;
+  padding:14px 15px;
+  background:linear-gradient(180deg,var(--ui-card),rgba(9,17,14,.90));
+  box-shadow:0 10px 30px rgba(0,0,0,.22);
+}
+.feature-card b,.status-card b,.quick-action-card b{
+  color:var(--ui-text)!important;
+  font-size:.98rem;
+}
+.feature-card span,.status-card span,.quick-action-card span{
+  display:block;
+  color:var(--ui-muted)!important;
+  font-size:.84rem;
+  line-height:1.45;
+  margin-top:4px;
+}
+.room-dashboard{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:10px;
+  margin:6px 0 8px;
+}
+.status-pill{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  border:1px solid var(--ui-border);
+  background:rgba(62,233,143,.10);
+  color:var(--ui-text)!important;
+  border-radius:999px;
+  padding:6px 10px;
+  font-weight:800;
+  font-size:.80rem;
+  margin:2px 6px 2px 0;
+}
+.help-strip{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  align-items:center;
+  border:1px solid var(--ui-border);
+  background:rgba(125,211,252,.08);
+  border-radius:16px;
+  padding:10px 12px;
+  margin:6px 0;
+}
+.help-strip span{color:var(--ui-muted)!important;font-size:.85rem;}
+.panel-title{
+  display:flex;
+  justify-content:space-between;
+  gap:12px;
+  align-items:center;
+  margin-bottom:6px;
+}
+.panel-title b{font-size:1.05rem;color:var(--ui-text)!important;}
+.panel-title span{font-size:.82rem;color:var(--ui-muted)!important;}
+.pinned-card{
+  border:1px solid rgba(250,204,21,.34);
+  background:linear-gradient(180deg,rgba(61,45,12,.78),rgba(24,19,9,.86));
+  border-radius:16px;
+  padding:11px 13px;
+  box-shadow:0 10px 30px rgba(0,0,0,.22);
+}
+.participant-list{display:grid;gap:8px;margin-top:8px;}
+.participant-item{
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  align-items:center;
+  border:1px solid var(--ui-border);
+  background:rgba(255,255,255,.045);
+  border-radius:14px;
+  padding:9px 11px;
+}
+.participant-item b{color:var(--ui-text)!important;}
+.participant-item span{color:var(--ui-muted)!important;font-size:.80rem;}
+
+/* Tombol dan input */
+.stButton button,.stFormSubmitButton button,.stDownloadButton button,.stLinkButton a{
+  min-height:42px!important;
+  border-radius:13px!important;
+  border:1px solid rgba(62,233,143,.40)!important;
+  background:linear-gradient(180deg,rgba(62,233,143,.18),rgba(24,47,37,.96))!important;
+  color:var(--ui-text)!important;
+  font-family:var(--ui-font)!important;
+  font-weight:800!important;
+  text-transform:none!important;
+  letter-spacing:0!important;
+  box-shadow:0 8px 24px rgba(0,0,0,.22)!important;
+}
+.stButton button:hover,.stFormSubmitButton button:hover,.stDownloadButton button:hover,.stLinkButton a:hover{
+  border-color:rgba(62,233,143,.72)!important;
+  background:linear-gradient(180deg,rgba(62,233,143,.30),rgba(30,65,49,.98))!important;
+  color:#fff!important;
+  transform:translateY(-1px);
+}
+.stButton button[kind="primary"],.stFormSubmitButton button[kind="primary"]{
+  background:linear-gradient(180deg,rgba(251,113,133,.92),rgba(136,19,55,.96))!important;
+  border-color:rgba(251,113,133,.58)!important;
+  color:#fff!important;
+}
+.stTextInput input,.stTextArea textarea,.stNumberInput input,.stSelectbox div[data-baseweb="select"]>div,.stDateInput input,.stTimeInput input{
+  min-height:42px!important;
+  border-radius:13px!important;
+  border:1px solid var(--ui-border)!important;
+  background:rgba(4,11,8,.92)!important;
+  color:var(--ui-text)!important;
+  font-family:var(--ui-font)!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.03)!important;
+}
+.stTextArea textarea{line-height:1.45!important;}
+.stTextInput input::placeholder,.stTextArea textarea::placeholder{color:rgba(168,216,189,.68)!important;}
+.stSlider [data-baseweb="slider"]{padding-top:.4rem!important;}
+
+/* Tabs mudah dipahami dan bisa discroll di HP */
+.stTabs [data-baseweb="tab-list"]{
+  gap:8px!important;
+  overflow-x:auto!important;
+  padding:4px 0 8px!important;
+  scrollbar-width:none;
+  border-bottom:0!important;
+}
+.stTabs [data-baseweb="tab-list"]::-webkit-scrollbar{display:none;}
+.stTabs [data-baseweb="tab"]{
+  flex:0 0 auto!important;
+  min-height:38px!important;
+  padding:.35rem .75rem!important;
+  border:1px solid var(--ui-border)!important;
+  border-radius:999px!important;
+  background:rgba(255,255,255,.045)!important;
+  color:var(--ui-muted)!important;
+  font-family:var(--ui-font)!important;
+  font-size:.88rem!important;
+}
+.stTabs [aria-selected="true"]{
+  color:var(--ui-text)!important;
+  background:rgba(62,233,143,.18)!important;
+  border-color:rgba(62,233,143,.42)!important;
+}
+
+/* Online chips */
+.online-strip{
+  gap:8px!important;
+  padding:8px 0 4px!important;
+}
+.online-chip{
+  border-radius:999px!important;
+  background:rgba(255,255,255,.055)!important;
+  border-color:var(--ui-border)!important;
+  font-family:var(--ui-font)!important;
+}
+.online-dot{background:var(--ui-accent)!important;box-shadow:0 0 0 3px rgba(62,233,143,.16)!important;}
+.room-status-line{margin:6px 0 0!important;}
+
+/* Chat iframe wrapper */
+iframe[title="st.iframe"]{
+  border-radius:18px!important;
+  box-shadow:0 18px 48px rgba(0,0,0,.24)!important;
+}
+
+@media (min-width:1100px){
+  .block-container{padding-left:2rem!important;padding-right:2rem!important;}
+}
+@media (max-width:760px){
+  .block-container{padding:1rem .62rem .8rem!important;}
+  .landing-grid{grid-template-columns:1fr!important;gap:8px!important;}
+  .room-dashboard{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:8px!important;}
+  .hero,.terminal-hero{border-radius:18px!important;padding:17px 16px!important;}
+  .terminal-hero h1,.hero h1{font-size:1.72rem!important;}
+  .terminal-card{padding:14px!important;}
+  .feature-card,.status-card,.quick-action-card{padding:12px!important;border-radius:15px!important;}
+  .stTabs [data-baseweb="tab"]{font-size:.82rem!important;min-height:36px!important;padding:.30rem .62rem!important;}
+  .stButton button,.stFormSubmitButton button,.stDownloadButton button,.stLinkButton a{min-height:40px!important;font-size:.88rem!important;}
+  .stTextInput input,.stTextArea textarea,.stNumberInput input{font-size:16px!important;}
+  .panel-title{align-items:flex-start;flex-direction:column;gap:2px;}
+}
+@media (max-width:420px){
+  .room-dashboard{grid-template-columns:1fr!important;}
+  .badge{font-size:.70rem!important;margin-bottom:4px;}
+}
+</style>
+"""
+
 CHAT_CSS = """
 <style>
 :root{
@@ -836,6 +1162,82 @@ html,body{
 </style>
 """
 
+CHAT_UI_CSS = """
+<style>
+:root{
+  --chat-bg:rgba(9,17,14,.94);
+  --chat-surface:rgba(18,31,26,.94);
+  --chat-border:rgba(126,231,166,.26);
+  --chat-accent:#3ee98f;
+  --chat-blue:#7dd3fc;
+  --chat-text:#ecfff4;
+  --chat-muted:#a8d8bd;
+  --chat-font:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;
+}
+html,body,.chat,.bubble,.meta{font-family:var(--chat-font)!important;}
+.chat{
+  min-height:430px!important;
+  border-radius:20px!important;
+  border:1px solid var(--chat-border)!important;
+  background:
+    radial-gradient(circle at top left, rgba(62,233,143,.12), transparent 34%),
+    linear-gradient(180deg,var(--chat-bg),rgba(4,8,7,.98))!important;
+  background-size:auto!important;
+  animation:none!important;
+  box-shadow:0 18px 48px rgba(0,0,0,.28)!important;
+  padding:14px!important;
+}
+.bubble{
+  border-radius:18px!important;
+  border:1px solid rgba(126,231,166,.20)!important;
+  background:linear-gradient(180deg,rgba(255,255,255,.07),rgba(12,22,18,.94))!important;
+  box-shadow:0 8px 26px rgba(0,0,0,.20)!important;
+  color:var(--chat-text)!important;
+  line-height:1.48!important;
+}
+.row.me .bubble{
+  background:linear-gradient(180deg,rgba(62,233,143,.26),rgba(26,64,45,.96))!important;
+  border-color:rgba(62,233,143,.40)!important;
+}
+.row.system-row .bubble{
+  border-color:rgba(250,204,21,.36)!important;
+  background:linear-gradient(180deg,rgba(74,54,13,.70),rgba(24,19,9,.92))!important;
+  color:#fff7d6!important;
+}
+.meta{
+  color:var(--chat-muted)!important;
+  letter-spacing:0!important;
+  text-transform:none!important;
+  font-size:10px!important;
+}
+.user-dot,.online-dot{background:var(--chat-accent)!important;}
+.secret,.poll,.checklist,.packet,.location,.ping,.system-info{
+  border-radius:999px!important;
+  padding:3px 8px!important;
+  background:rgba(125,211,252,.12)!important;
+  border:1px solid rgba(125,211,252,.26)!important;
+  color:var(--chat-blue)!important;
+  font-weight:800!important;
+}
+.empty{
+  color:var(--chat-muted)!important;
+  border:1px dashed rgba(126,231,166,.24);
+  border-radius:16px;
+  padding:20px;
+  background:rgba(255,255,255,.04);
+}
+.pinned-card{
+  border-radius:16px!important;
+  background:linear-gradient(180deg,rgba(61,45,12,.78),rgba(24,19,9,.88))!important;
+}
+.thumb{border-radius:14px!important;border-color:rgba(126,231,166,.24)!important;}
+@media (max-width:760px){
+  .chat{min-height:380px!important;border-radius:16px!important;padding:10px!important;}
+  .bubble{max-width:88%!important;border-radius:16px!important;font-size:14px!important;padding:10px 11px!important;}
+  .meta{font-size:9.5px!important;}
+}
+</style>
+"""
 
 
 def ensure_dirs() -> None:
@@ -2802,7 +3204,7 @@ def user_hue(username: str) -> int:
 
 def render_chat(messages: list[dict[str, Any]], username: str, room: str = "") -> str:
     if not messages:
-        return CHAT_CSS + """
+        return CHAT_CSS + CHAT_UI_CSS + """
         <div id="antitrust-chat-box" class="chat"><div class="empty">Belum ada pesan. Mulai percakapan aman.</div><div id="antitrust-chat-bottom"></div></div>
         <script>
           // Scroll hanya di dalam kotak chat, bukan scroll halaman browser.
@@ -2890,7 +3292,7 @@ def render_chat(messages: list[dict[str, Any]], username: str, room: str = "") -
         rows += f'<div class="{cls}"><div class="bubble"{bubble_style}>{content}<div class="meta">{dot}<span>{sender_label}</span>{me_label}{pin_label}<span>{time_label}</span></div></div></div>'
 
     countdown_payload = json.dumps(countdown_targets, ensure_ascii=False)
-    return CHAT_CSS + f"""
+    return CHAT_CSS + CHAT_UI_CSS + f"""
     <div id="antitrust-chat-box" class="chat">{rows}<div id="antitrust-chat-bottom"></div></div>
     <script>
       const box = document.getElementById('antitrust-chat-box');
@@ -3274,14 +3676,14 @@ def render_admin_panel() -> None:
 
 def render_public_room_creator() -> None:
     st.markdown('<div class="terminal-card">', unsafe_allow_html=True)
-    st.markdown('<div class="terminal-note">$ create_room --anonymous --random --temporary-link</div>', unsafe_allow_html=True)
-    st.subheader("Buat room")
-    st.caption("Nama room dibuat otomatis dan acak. Password room membuka enkripsi/chat; PIN aksi pembuat dipakai untuk lock, GMeet, revoke, dan pengaturan sensitif.")
+    st.markdown('<div class="terminal-note">Buat ruang aman sementara</div>', unsafe_allow_html=True)
+    st.subheader("Buat Room Baru")
+    st.caption("Isi password room, tentukan durasi, lalu bagikan link undangan. PIN aksi pembuat dipakai untuk kontrol sensitif seperti lock, Google Meet, dan revoke.")
     creator_password = st.text_input("Password room / enkripsi (min 8 karakter)", type="password", help="Bagikan ke peserta yang dipercaya agar mereka bisa membuka room. Jangan samakan dengan PIN aksi pembuat jika ingin kontrol lebih aman.", key="public_creator_room_password")
     owner_pin_input = st.text_input("PIN aksi pembuat (opsional, min 6 karakter)", type="password", help="Kosongkan untuk dibuat otomatis. PIN ini jangan dibagikan ke peserta biasa.", key="public_owner_pin_input")
     ttl = st.slider("Durasi room", min_value=1, max_value=ROOM_MAX_TTL_MINUTES, value=ROOM_DEFAULT_TTL_MINUTES, help="Maksimal 60 menit. Tampilan link hilang otomatis setelah 1 menit, tanpa revoke.", key="public_room_ttl")
     max_participants = st.slider("Maksimal peserta aktif", min_value=1, max_value=ROOM_MAX_PARTICIPANTS, value=DEFAULT_MAX_PARTICIPANTS, help="Peserta baru ditolak jika room sudah mencapai batas ini.", key="public_room_max_participants")
-    if st.button("Create random room + link", use_container_width=True):
+    if st.button("Buat room & link undangan", use_container_width=True):
         if len(str(creator_password or "").strip()) < 8:
             st.warning("Password room minimal 8 karakter agar key Fernet lebih kuat.")
             st.markdown('</div>', unsafe_allow_html=True)
@@ -3301,7 +3703,7 @@ def render_public_room_creator() -> None:
         st.session_state["public_room_share_password"] = str(creator_password or "")
         st.session_state["public_owner_pin"] = owner_pin
         st.session_state["public_invite_display_until"] = now_epoch() + 60
-        st.success(f"Room otomatis `{room}` berhasil dibuat. Link hanya ditampilkan 1 menit, tanpa revoke.")
+        st.success(f"Room `{room}` berhasil dibuat. Salin link dan password sekarang; tampilan link akan disembunyikan dalam 1 menit.")
     if st.session_state.get("public_invite_url"):
         col1, col2 = st.columns(2)
         with col1:
@@ -3326,9 +3728,14 @@ def render_public_room_creator() -> None:
 def render_landing() -> None:
     st.markdown(
         """<div class="terminal-hero">
-            <div class="terminal-kicker">root@antitrust:~# encrypted room gateway</div>
+            <div class="terminal-kicker">Private temporary room · chat · file · Google Meet</div>
             <h1>AntiTrust<span class="terminal-cursor"></span></h1>
-            <p class="muted">Mode terminal aktif. Buat room sementara, salin invite sekali klik, lalu link menghilang dari halaman tanpa revoke.</p>
+            <p class="muted">Buat ruang diskusi sementara yang mudah dipakai di desktop maupun HP. Link undangan, password room, PIN pembuat, dan Google Meet dibuat lebih jelas agar sesi terasa aman dan rapi.</p>
+        </div>
+        <div class="landing-grid">
+          <div class="feature-card"><b>1. Buat room</b><span>Room otomatis memakai nama acak, durasi terbatas, dan password enkripsi.</span></div>
+          <div class="feature-card"><b>2. Bagikan undangan</b><span>Salin link, template pesan, atau QR. Link bisa disembunyikan dari halaman.</span></div>
+          <div class="feature-card"><b>3. Jalankan sesi</b><span>Chat, file, pin pesan, ringkasan, peserta aktif, dan tombol Google Meet.</span></div>
         </div>""",
         unsafe_allow_html=True,
     )
@@ -3339,14 +3746,16 @@ def render_landing() -> None:
 
 def render_sidebar() -> tuple[bool, int, bool]:
     st.sidebar.title("🔐 AntiTrust")
+    st.sidebar.caption("Kontrol cepat sesi. Di HP, sidebar bisa dibuka dari ikon menu Streamlit.")
     # Auto refresh sengaja dibuat aktif secara default agar nyaman di HP.
     # Komponen refresh ditempatkan dekat area chat, bukan di awal halaman, supaya fokus tetap ke pesan.
     auto_refresh = True
-    interval = st.sidebar.selectbox("Interval refresh", [2, 5, 8, 10, 15, 30, 60], index=0)
-    sound = st.sidebar.toggle("Suara pesan baru", value=True)
-    if st.sidebar.button("Refresh manual", use_container_width=True):
+    interval = st.sidebar.selectbox("Refresh chat setiap", [2, 5, 8, 10, 15, 30, 60], index=0, help="Semakin kecil, chat terasa lebih real-time tetapi halaman lebih sering refresh.")
+    sound = st.sidebar.toggle("Bunyikan pesan masuk", value=True)
+    if st.sidebar.button("Refresh sekarang", use_container_width=True):
         st.rerun()
-    st.sidebar.caption("Auto refresh chat aktif otomatis setiap 2 detik. Di HP, fokus diarahkan ke area pesan dan form kirim.")
+    st.sidebar.divider()
+    st.sidebar.caption("Tips: gunakan Pusat kontrol room untuk invite, Google Meet, peserta, file, dan aksi keamanan.")
     return auto_refresh, interval, sound
 
 
@@ -3384,7 +3793,7 @@ def render_mobile_message_focus() -> None:
 
 
 def render_room_invite_panel(room: str, username: str) -> None:
-    with st.expander("Invite", expanded=False):
+    with st.container(border=False):
         room_left = room_seconds_left(room)
         config = get_room_config(room)
         if config.get("is_locked") and not room_creator_is_unlocked(room):
@@ -3461,8 +3870,8 @@ def render_video_call_panel(room: str, username: str) -> None:
     current_note = str(data.get("session_note", DEFAULT_VIDEO_SESSION_NOTE) or DEFAULT_VIDEO_SESSION_NOTE)
     current_visible = bool(data.get("visible", False))
 
-    st.markdown("**Google Meet**")
-    st.caption("Koneksi video call bisa menggunakan Google Meet. Sesi mengikuti waktu chat/room aktif, jadi patokannya adalah countdown room.")
+    st.markdown("### 🎥 Google Meet")
+    st.caption("Simpan link Google Meet di sini. Peserta hanya melihat tombol Join saat pembuat menampilkannya.")
 
     if current_url and current_visible and not room_is_expired(room):
         st.success("Link Google Meet aktif dan terlihat oleh peserta.")
@@ -3516,7 +3925,7 @@ def render_video_call_panel(room: str, username: str) -> None:
 
 
 def render_room_actions(room: str, username: str) -> None:
-    with st.expander("Aksi", expanded=False):
+    with st.container(border=False):
         st.caption("Keluar room dinonaktifkan agar identitas tidak bisa direset.")
 
         if not render_room_creator_unlock(room, "revoke_room_actions"):
@@ -3574,7 +3983,7 @@ def render_room_settings(room: str) -> None:
 
 def render_room_access_control(room: str, username: str) -> None:
     config = get_room_config(room)
-    st.markdown("**Kontrol akses room**")
+    st.markdown("### 🛡️ Kontrol akses room")
     locked = bool(config.get("is_locked"))
     max_participants = int(config.get("max_participants", DEFAULT_MAX_PARTICIPANTS) or DEFAULT_MAX_PARTICIPANTS)
     active_count = active_session_count(room)
@@ -3606,15 +4015,24 @@ def render_room_access_control(room: str, username: str) -> None:
 def render_participant_panel(room: str, current_username: str) -> None:
     entries = get_room_online_entries(room)
     config = get_room_config(room)
-    st.markdown("**Peserta aktif**")
-    st.caption(f"{len(entries)}/{config.get('max_participants', DEFAULT_MAX_PARTICIPANTS)} peserta aktif · timeout online sekitar {ONLINE_ACTIVE_SECONDS} detik")
+    st.markdown("### 👥 Peserta aktif")
+    st.caption(f"{len(entries)}/{config.get('max_participants', DEFAULT_MAX_PARTICIPANTS)} peserta aktif · status online diperbarui otomatis")
     if not entries:
         st.info("Belum ada peserta aktif.")
         return
+    rows = []
     for entry in entries:
         name = normalize_display_name(entry.get("username", "")) or "unknown"
-        me = " · kamu" if entry.get("is_me") or canonical_display_name(name) == canonical_display_name(current_username) else ""
-        st.markdown(f"- **{html.escape(name)}**{me} · terakhir aktif {int(entry.get('seconds_ago', 0))} detik lalu", unsafe_allow_html=True)
+        is_me = bool(entry.get("is_me")) or canonical_display_name(name) == canonical_display_name(current_username)
+        me = " · kamu" if is_me else ""
+        seconds = int(entry.get('seconds_ago', 0))
+        rows.append(
+            '<div class="participant-item">'
+            f'<b>{username_with_badge_html(name)}{html.escape(me)}</b>'
+            f'<span>aktif {seconds} detik lalu</span>'
+            '</div>'
+        )
+    st.markdown('<div class="participant-list">' + ''.join(rows) + '</div>', unsafe_allow_html=True)
 
 
 def render_audit_log(room: str) -> None:
@@ -3750,12 +4168,12 @@ def render_pinned_message(room: str, messages: list[dict[str, Any]]) -> None:
     if not msg:
         set_pinned_message(room, "")
         return
-    st.markdown(f'<div class="card"><b>📌 Pinned</b><br><span class="muted">{html.escape(message_summary(msg, room))}</span></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="pinned-card"><b>📌 Pesan penting</b><br><span class="muted">{html.escape(message_summary(msg, room))}</span></div>', unsafe_allow_html=True)
 
 
 def render_feature_panel(room: str, username: str, messages: list[dict[str, Any]]) -> None:
-    with st.expander("Fitur", expanded=False):
-        tab_secret, tab_poll, tab_check, tab_react, tab_pin, tab_summary = st.tabs(["Secret", "Poll", "Checklist", "React", "Pin", "Summary"])
+    with st.container(border=False):
+        tab_secret, tab_poll, tab_check, tab_react, tab_pin, tab_summary = st.tabs(["🔒 Secret", "📊 Poll", "☑️ Checklist", "😊 React", "📌 Pin", "📝 Summary"])
         with tab_secret:
             secret_messages = [m for m in messages if str(m.get("type")) in {"secret_note", "one_time"}]
             if not secret_messages:
@@ -3842,8 +4260,8 @@ def render_feature_panel(room: str, username: str, messages: list[dict[str, Any]
 
 def render_message_form(room: str, username: str) -> None:
     with st.container(border=True):
-        st.markdown("**Kirim**")
-        tab_text, tab_ping, tab_special, tab_self, tab_img, tab_voice, tab_doc = st.tabs(["| Text |", "| Ping |", "| Secret |", "| Self-destruct |", "| Image |", "| Voice |", "| Doc |"])
+        st.markdown("### 💬 Kirim pesan")
+        tab_text, tab_ping, tab_special, tab_self, tab_img, tab_voice, tab_doc = st.tabs(["💬 Teks", "📡 Ping", "🔒 Secret", "⏳ Hilang", "🖼️ Gambar", "🎙️ Voice", "📎 Dokumen"])
         with tab_text:
             with st.form("text-message", clear_on_submit=True):
                 message = st.text_input(
@@ -4046,9 +4464,36 @@ def render_online_users(entries: list[dict[str, Any]], current_username: str) ->
     st.markdown(f'<div class="online-strip">{label}{"".join(chips)}</div>', unsafe_allow_html=True)
 
 
+def render_room_dashboard(room: str, active_count: int, username: str) -> None:
+    config = get_room_config(room)
+    video_call = get_room_video_call(room)
+    locked = bool(config.get("is_locked"))
+    max_participants = int(config.get("max_participants", DEFAULT_MAX_PARTICIPANTS) or DEFAULT_MAX_PARTICIPANTS)
+    video_status = "Siap" if video_call.get("url") and video_call.get("visible") else ("Tersimpan" if video_call.get("url") else "Belum diset")
+    lock_icon = "🔒" if locked else "🔓"
+    lock_text = "Terkunci" if locked else "Terbuka"
+    cards = [
+        ("⏱️ Sisa room", format_room_time_left(room_seconds_left(room))),
+        (f"{lock_icon} Akses", lock_text),
+        ("👥 Peserta", f"{active_count}/{max_participants} aktif"),
+        ("🎥 Google Meet", video_status),
+    ]
+    html_cards = ''.join(
+        f'<div class="status-card"><b>{html.escape(title)}</b><span>{html.escape(value)}</span></div>'
+        for title, value in cards
+    )
+    st.markdown(f'<div class="room-dashboard">{html_cards}</div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="help-strip"><span>Masuk sebagai <b>{username_with_badge_html(username)}</b>.</span>'
+        '<span>Gunakan Pusat kontrol room untuk undangan, video, peserta, file, dan keamanan.</span></div>',
+        unsafe_allow_html=True,
+    )
+
+
 def render_compact_room_panel(room: str, username: str, messages: list[dict[str, Any]]) -> None:
-    with st.expander("Panel room", expanded=False):
-        tab_invite, tab_video, tab_participants, tab_features, tab_files, tab_security = st.tabs(["| Invite |", "| Video Call |", "| Peserta |", "| Fitur |", "| File |", "| Aksi |"])
+    with st.expander("Pusat kontrol room", expanded=True):
+        st.markdown('<div class="panel-title"><b>Kelola sesi</b><span>Invite, video call, peserta, file, dan keamanan.</span></div>', unsafe_allow_html=True)
+        tab_invite, tab_video, tab_participants, tab_features, tab_files, tab_security = st.tabs(["🔗 Undangan", "🎥 Video", "👥 Peserta", "✨ Fitur", "📎 File", "🛡️ Keamanan"])
         with tab_invite:
             render_room_invite_panel(room, username)
         with tab_video:
@@ -4142,8 +4587,8 @@ def render_invite_expiry_redirect(seconds_left: int) -> None:
 
 def main() -> None:
     ensure_dirs()
-    st.set_page_config(page_title=APP_TITLE, page_icon=APP_ICON, layout="centered")
-    st.markdown(CSS, unsafe_allow_html=True)
+    st.set_page_config(page_title=APP_TITLE, page_icon=APP_ICON, layout="wide")
+    st.markdown(CSS + UI_ENHANCEMENT_CSS, unsafe_allow_html=True)
     destroyed = purge_inactive_rooms()
     auto_refresh, interval, sound = render_sidebar()
     if destroyed:
@@ -4207,10 +4652,12 @@ def main() -> None:
     config = get_room_config(room)
     status = room_status_label(room, len(active_users))
     st.markdown(
-        f'<div class="room-status-line"><span class="muted">{username_with_badge_html(username)} · {html.escape(status)} · '
-        f'sisa {format_countdown(room_seconds_left(room))} · kosong: {choice_from_minutes(config.get("auto_destroy_minutes"))}</span></div>',
+        f'<div class="room-status-line"><span class="status-pill">{username_with_badge_html(username)}</span>'
+        f'<span class="status-pill">{html.escape(status)}</span>'
+        f'<span class="status-pill">Auto-destroy kosong: {choice_from_minutes(config.get("auto_destroy_minutes"))}</span></div>',
         unsafe_allow_html=True,
     )
+    render_room_dashboard(room, len(active_users), username)
     render_online_users(online_entries, username)
     video_call = get_room_video_call(room)
     if video_call.get("url") and video_call.get("visible") and not room_is_expired(room):
@@ -4225,7 +4672,7 @@ def main() -> None:
     render_message_focus_marker()
     # Height iframe dibuat pas dengan chat panel agar tidak ada ruang kosong besar
     # antara panel pesan dan form kirim.
-    components.html(render_chat(render_messages, username, room), height=430, scrolling=False)
+    components.html(render_chat(render_messages, username, room), height=520, scrolling=False)
     render_message_form(room, username)
     render_compose_focus_marker()
     render_mobile_message_focus()
