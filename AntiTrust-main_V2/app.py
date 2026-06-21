@@ -533,6 +533,280 @@ iframe[title="st.iframe"]{display:block!important;border-radius:18px!important;b
   .room-dashboard{grid-template-columns:1fr!important;}
   .badge{font-size:.74rem!important;margin-bottom:4px;}
 }
+
+
+/* ============================================================
+   DARK-SYSTEM READABILITY FIX
+   Menjaga area kolom, form, input, dan dropdown tetap terang/kontras
+   walau browser/OS memakai dark mode atau Streamlit mengikuti theme dark.
+   ============================================================ */
+:root,
+html,
+body,
+.stApp,
+[data-testid="stAppViewContainer"],
+[data-testid="stHeader"],
+[data-testid="stToolbar"]{
+  color-scheme: light !important;
+}
+
+@media (prefers-color-scheme: dark){
+  html, body, .stApp, [data-testid="stAppViewContainer"]{
+    background: var(--app-bg) !important;
+    color: var(--text) !important;
+  }
+}
+
+/* Kolom dan panel dibuat eksplisit agar tidak berubah menjadi gelap/abu tua */
+[data-testid="column"],
+[data-testid="column"] > div,
+[data-testid="stForm"],
+[data-testid="stVerticalBlockBorderWrapper"],
+[data-testid="stExpander"],
+[data-testid="stMetric"],
+[data-testid="metric-container"],
+.stAlert,
+[data-testid="stAlert"],
+[data-testid="stFileUploader"],
+[data-testid="stDataFrame"],
+.card,
+.terminal-card,
+.feature-card,
+.status-card,
+.quick-action-card,
+.participant-item,
+.pinned-card,
+.online-chip{
+  color: var(--text) !important;
+}
+
+[data-testid="stForm"],
+[data-testid="stVerticalBlockBorderWrapper"],
+[data-testid="stExpander"],
+[data-testid="metric-container"],
+[data-testid="stFileUploader"],
+[data-testid="stDataFrame"],
+.card,
+.terminal-card,
+.feature-card,
+.status-card,
+.quick-action-card,
+.participant-item,
+.online-chip{
+  background-color: #ffffff !important;
+  border-color: var(--border) !important;
+}
+
+/* Teks di dalam kolom/form jangan mengikuti warna dark theme */
+[data-testid="column"] p,
+[data-testid="column"] span,
+[data-testid="column"] label,
+[data-testid="column"] div,
+[data-testid="column"] small,
+[data-testid="column"] strong,
+[data-testid="column"] b,
+[data-testid="stForm"] p,
+[data-testid="stForm"] span,
+[data-testid="stForm"] label,
+[data-testid="stForm"] div,
+[data-testid="stExpander"] p,
+[data-testid="stExpander"] span,
+[data-testid="stExpander"] label,
+[data-testid="stExpander"] div{
+  color: var(--text) !important;
+  text-shadow: none !important;
+}
+
+/* Keterangan/placeholder tetap cukup gelap, bukan abu-abu terlalu muda */
+[data-testid="column"] .stCaption,
+[data-testid="column"] [data-testid="stCaptionContainer"],
+[data-testid="column"] [data-testid="stCaptionContainer"] *,
+[data-testid="stForm"] .stCaption,
+[data-testid="stForm"] [data-testid="stCaptionContainer"],
+[data-testid="stForm"] [data-testid="stCaptionContainer"] *,
+.muted,
+.terminal-note,
+.feature-card span,
+.status-card span,
+.quick-action-card span,
+.participant-item span,
+.panel-title span,
+.online-label{
+  color: var(--muted) !important;
+}
+
+/* Input/box ketik: border tebal, background putih, teks gelap di semua theme */
+.stTextInput,
+.stTextArea,
+.stNumberInput,
+.stDateInput,
+.stTimeInput,
+.stSelectbox,
+.stMultiSelect{
+  color: var(--text) !important;
+}
+
+.stTextInput input,
+.stTextArea textarea,
+.stNumberInput input,
+.stDateInput input,
+.stTimeInput input,
+[data-baseweb="input"] input,
+[data-baseweb="textarea"] textarea,
+[data-baseweb="select"] > div,
+.stSelectbox div[data-baseweb="select"] > div,
+.stMultiSelect div[data-baseweb="select"] > div{
+  background: #ffffff !important;
+  color: #0f172a !important;
+  -webkit-text-fill-color: #0f172a !important;
+  border: 2px solid var(--border-strong) !important;
+  box-shadow: 0 1px 2px rgba(15,23,42,.06) !important;
+  opacity: 1 !important;
+}
+
+.stTextInput input:focus,
+.stTextArea textarea:focus,
+.stNumberInput input:focus,
+.stDateInput input:focus,
+.stTimeInput input:focus,
+[data-baseweb="input"] input:focus,
+[data-baseweb="textarea"] textarea:focus,
+[data-baseweb="select"] > div:focus-within,
+.stSelectbox div[data-baseweb="select"] > div:focus-within,
+.stMultiSelect div[data-baseweb="select"] > div:focus-within{
+  background: #ffffff !important;
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 4px rgba(37,99,235,.18) !important;
+  outline: none !important;
+}
+
+.stTextInput input::placeholder,
+.stTextArea textarea::placeholder,
+[data-baseweb="input"] input::placeholder,
+[data-baseweb="textarea"] textarea::placeholder{
+  color: #64748b !important;
+  -webkit-text-fill-color: #64748b !important;
+  opacity: 1 !important;
+}
+
+/* Dropdown/selectbox: trigger, menu popup, option, dan teks dipaksa terang */
+[data-baseweb="select"],
+[data-baseweb="select"] *,
+.stSelectbox [data-baseweb="select"],
+.stSelectbox [data-baseweb="select"] *,
+.stMultiSelect [data-baseweb="select"],
+.stMultiSelect [data-baseweb="select"] *{
+  color: #0f172a !important;
+  text-shadow: none !important;
+}
+
+[data-baseweb="select"] svg,
+.stSelectbox svg,
+.stMultiSelect svg{
+  color: #475569 !important;
+  fill: #475569 !important;
+}
+
+[data-baseweb="popover"],
+[data-baseweb="popover"] > div,
+[data-baseweb="menu"],
+[data-baseweb="menu"] ul,
+[data-baseweb="menu"] li,
+[role="listbox"],
+[role="listbox"] *,
+[role="option"],
+[role="option"] *{
+  background: #ffffff !important;
+  color: #0f172a !important;
+  -webkit-text-fill-color: #0f172a !important;
+  text-shadow: none !important;
+  opacity: 1 !important;
+}
+
+[data-baseweb="popover"],
+[data-baseweb="menu"],
+[role="listbox"]{
+  border: 2px solid var(--border-strong) !important;
+  box-shadow: 0 20px 50px rgba(15,23,42,.22) !important;
+}
+
+[role="option"],
+[data-baseweb="menu"] li{
+  min-height: 42px !important;
+  display: flex !important;
+  align-items: center !important;
+  padding: 9px 12px !important;
+  font-size: 16px !important;
+}
+
+[role="option"]:hover,
+[role="option"][aria-selected="true"],
+[data-baseweb="menu"] li:hover,
+[data-baseweb="menu"] li[aria-selected="true"]{
+  background: #e0ecff !important;
+  color: #1d4ed8 !important;
+  -webkit-text-fill-color: #1d4ed8 !important;
+}
+
+/* Radio, checkbox, slider, upload, dan label tetap kontras */
+.stCheckbox label,
+.stCheckbox label *,
+.stRadio label,
+.stRadio label *,
+.stSlider label,
+.stSlider label *,
+.stFileUploader label,
+.stFileUploader label *,
+[data-testid="stWidgetLabel"],
+[data-testid="stWidgetLabel"] *{
+  color: var(--text) !important;
+  -webkit-text-fill-color: var(--text) !important;
+}
+
+/* Tombol dan tab tetap terang di dark system */
+.stButton button,
+.stFormSubmitButton button,
+.stDownloadButton button,
+.stLinkButton a,
+.stTabs [data-baseweb="tab"]{
+  background-color: #ffffff !important;
+  color: #1e40af !important;
+  -webkit-text-fill-color: #1e40af !important;
+}
+
+.stTabs [aria-selected="true"]{
+  background-color: #eff6ff !important;
+  color: #1d4ed8 !important;
+  -webkit-text-fill-color: #1d4ed8 !important;
+}
+
+/* Admin panel dan ringkasan room dibuat lebih aman dari dark override */
+.admin-panel,
+.admin-panel *,
+.room-dashboard,
+.room-dashboard *,
+.panel-title,
+.panel-title *,
+.help-strip,
+.help-strip *{
+  color: var(--text) !important;
+  text-shadow: none !important;
+}
+
+.help-strip,
+.room-dashboard .status-card{
+  background: #ffffff !important;
+  border-color: var(--border) !important;
+}
+
+@media (max-width:760px){
+  [role="option"],
+  [data-baseweb="menu"] li{
+    min-height: 46px !important;
+    font-size: 16px !important;
+  }
+}
+
 </style>
 """
 
@@ -995,11 +1269,9 @@ div[data-baseweb="select"] [data-testid="stIconMaterial"]{
 }
 
 /* Fallback bila ada renderer yang tetap menampilkan ligature sebagai teks biasa. */
-.kbd-arrow-fallback-plain{
-  font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif!important;
-  font-size:20px!important;
-  line-height:1!important;
-  color:#334155!important;
+.kbd-arrow-fallback-hidden{
+  font-size:0!important;
+  color:transparent!important;
   max-width:20px!important;
   overflow:hidden!important;
 }
@@ -1042,7 +1314,7 @@ KEYBOARD_ARROW_CLEANUP_JS = """
         RE.lastIndex = 0;
         el.textContent = replacement(txt);
         el.setAttribute('aria-hidden', 'true');
-        el.classList.add('kbd-arrow-fallback-plain');
+        el.classList.add('kbd-arrow-fallback-hidden');
         el.style.fontSize = '20px';
         el.style.color = '#334155';
         el.style.maxWidth = '20px';

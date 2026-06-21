@@ -33,3 +33,8 @@ Versi ini memperbaiki tampilan Admin Panel agar tidak tertumpuk, terutama di lay
 
 Teks ikon Material seperti `keyboard_arrow` dan `keyboard_double_arrow` sudah ditangani dengan CSS khusus dan fallback JavaScript. Dropdown/selectbox serta expander menampilkan simbol panah biasa yang ringkas, bukan teks ligature.
 
+
+
+### Catatan perbaikan dark mode sistem
+
+Versi ini memaksa area penting seperti kolom, form, box ketik, textarea, dropdown, admin panel, dan kartu status tetap memakai warna terang dengan teks gelap. Tujuannya agar aplikasi tetap mudah dibaca meskipun OS/browser pengguna berada pada **dark mode** atau Streamlit mengikuti theme dark.
